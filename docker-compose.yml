@@ -53,3 +53,54 @@ services:
     working_dir: /work
     entrypoint: ["python3", "scripts/local_bootstrap.py"]
     restart: "no"
+
+  # The ingest Lambda image, run under the Runtime Interface Emulator that ships
+  # in the AWS base image. Invoke it like EventBridge Scheduler would:
+  #   curl -s -d '{}' http://localhost:9001/2015-03-31/functions/function/invocations
+  ingest:
+    build:
+      context: .
+      dockerfile: ingest/Dockerfile
+    image: relay-ingest
+    entrypoint: ["/usr/local/bin/aws-lambda-rie", "/var/task/main"]
+    ports:
+      - "127.0.0.1:9001:8080"
+    environment:
+      <<: *aws-local
+      RELAY_PARAM_PREFIX: /relay
+      QUEUE_NAME: relay-events
+      INGEST_LAG_SECONDS: "120"
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+      fake-salesforce:
+        condition: service_started
+
+  # ---- developer tools (profile "tools": never started by `up`) --------------
+  # Go and golangci-lint without installing them:
+  #   docker compose run --rm go go test ./...
+  #   docker compose run --rm golangci-lint
+  go:
+    image: golang:1.27.1
+    profiles: ["tools"]
+    working_dir: /src
+    volumes:
+      - .:/src
+      - gomod:/go/pkg/mod
+      - gocache:/root/.cache/go-build
+    environment:
+      CGO_ENABLED: "0"
+
+  golangci-lint:
+    image: golangci/golangci-lint:v2.13.2
+    profiles: ["tools"]
+    working_dir: /src
+    volumes:
+      - .:/src
+      - gomod:/go/pkg/mod
+      - gocache:/root/.cache/go-build
+    command: ["golangci-lint", "run", "./..."]
+
+volumes:
+  gomod:
+  gocache:

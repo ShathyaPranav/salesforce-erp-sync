@@ -1,0 +1,11 @@
+.git
+.venv
+.mypy_cache
+.ruff_cache
+.pytest_cache
+.aws-sam
+**/__pycache__
+.env
+.env.*
+!.env.example
+docs/research
