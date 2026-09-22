@@ -84,3 +84,44 @@ measuring the window with the Lambda's clock would add clock skew as a new
 failure mode. The lag covers commit delay: a record stamped at 10:00:00 may
 only become visible at 10:00:40, so a window closing at "now" could step past
 it. Anything slower than the lag is caught by the nightly reconciler.
+
+## Phase 1.3: the sync worker and the idempotent write (Python)
+
+**What I built.** `worker/mapping.py` (validate an event, map Salesforce
+fields to ERP fields), `erp/writer.py` (`write_order`, the conditional
+DynamoDB transaction) and `worker/app.py` (the Lambda handler), shipped as
+`worker/Dockerfile`. `tests/harness/esm_pump.py` stands in locally for
+Lambda's SQS trigger, which only exists on AWS.
+
+**How it works.** For each message, `parse_body` reads the JSON with numbers
+as `Decimal` (DynamoDB rejects floats), `to_order` checks the required fields,
+and `write_order` sends **one `TransactWriteItems`** with three updates: the
+order, its invoice and the customer. Only the order has a condition:
+`attribute_not_exists(order_id) OR version < :v`, where `version` is
+`SystemModstamp` in milliseconds. That single line is the **idempotent write**
+(running it twice has the same effect as running it once). A new deal passes.
+A newer edit passes and bumps `revision`. The same version again fails, so
+it's a *duplicate*. An older version fails, so it's *stale*. Because it's a
+**transaction** (all or nothing), a failed condition also cancels the invoice
+and customer writes, so the three tables can never disagree. On failure,
+`ReturnValuesOnConditionCheckFailure=ALL_OLD` hands back the stored order, so
+`_classify` can tell duplicate from stale without another read. The handler
+processes each record on its own and returns a **partial batch response**: only
+the failed message IDs, so one bad message doesn't make the other nine retry.
+
+**See it yourself.**
+
+```powershell
+C:\Users\luckf\.venvs\relay\Scripts\python -m pytest tests/integration/test_worker.py -v
+docker compose logs worker | Select-String '"duplicate"|"stale"'
+```
+
+Four passing tests, then log lines showing the extra copies of one event
+landing as `duplicate`, and the old v1 arriving after v2 as `stale`.
+
+**Interview check.** *The worker wrote the order, then crashed before SQS
+deleted the message. What happens?* The message becomes visible again after
+its visibility timeout and is delivered a second time. The write's condition
+sees the same version already stored and does nothing, so the retry is
+harmless. This is exactly-once *effect* from at-least-once *delivery*, and
+it's why Relay needs no outbox table.
