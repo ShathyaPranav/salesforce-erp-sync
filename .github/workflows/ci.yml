@@ -1,0 +1,140 @@
+# Every push and pull request: lint, unit tests, and the full failure-injection
+# suite on the docker compose stack (which also builds all three Lambda images).
+# A push to main then deploys to AWS through GitHub OIDC and smoke-tests the
+# live stack. No AWS keys are stored anywhere: the deploy job trades GitHub's
+# identity token for a short-lived role (infra/bootstrap.yaml).
+#
+# Repository variables the deploy job reads (Settings > Secrets and variables >
+# Actions > Variables): AWS_DEPLOY_ROLE_ARN, ECR_REPOSITORY_URI, SF_LOGIN_URL,
+# SF_CLIENT_ID. None of them is a secret; the Salesforce client secret lives
+# only in SSM Parameter Store.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  AWS_REGION: us-east-1
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - name: ruff
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: mypy
+        run: mypy
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: gofmt and go vet
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13.2
+      - uses: aws-actions/setup-sam@v3
+        with:
+          use-installer: true
+      - name: sam validate
+        run: |
+          sam validate --lint
+          sam validate --lint -t infra/bootstrap.yaml
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - name: pytest (unit + contract)
+        run: pytest tests/unit tests/contract
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: go test
+        run: go test -race ./...
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Start the local stack (builds the ingest, worker and reconciler images)
+        run: docker compose up -d --build --wait
+      - name: Integration and failure-injection tests
+        env:
+          RELAY_REQUIRE_STACK: "1" # fail, don't skip, if the stack isn't up
+        run: pytest tests/integration
+      - name: Stack logs
+        if: failure()
+        run: docker compose logs --no-color --tail 300
+      - if: always()
+        run: docker compose down -v
+
+  deploy:
+    # Only a push to main deploys. Pull requests never get AWS credentials.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [lint, unit, integration]
+    runs-on: ubuntu-latest
+    # No `environment:` key: it would change the OIDC token's subject from
+    # repo:OWNER/REPO:ref:refs/heads/main, and the role's trust policy would reject it.
+    concurrency:
+      group: deploy-dev
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write # lets the job request GitHub's OIDC token
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install -r requirements-dev.txt
+      - uses: aws-actions/setup-sam@v3
+        with:
+          use-installer: true
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: sam build
+        run: sam build
+      - name: sam deploy
+        run: >
+          sam deploy
+          --no-confirm-changeset
+          --no-fail-on-empty-changeset
+          --image-repository "${{ vars.ECR_REPOSITORY_URI }}"
+          --parameter-overrides
+          "SalesforceLoginUrl=${{ vars.SF_LOGIN_URL }}"
+          "SalesforceClientId=${{ vars.SF_CLIENT_ID }}"
+      - name: Smoke test the live stack
+        run: python scripts/smoke.py --timeout 90
