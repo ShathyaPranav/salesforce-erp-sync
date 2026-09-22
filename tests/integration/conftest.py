@@ -15,8 +15,8 @@ import boto3
 import pytest
 import requests
 
-ENDPOINT = os.environ.get("RELAY_TEST_AWS_ENDPOINT", "http://localhost:4566")
-FAKE_SF = os.environ.get("RELAY_TEST_FAKE_SF", "http://localhost:8080")
+ENDPOINT = os.environ.get("RELAY_TEST_AWS_ENDPOINT", "http://127.0.0.1:4566")
+FAKE_SF = os.environ.get("RELAY_TEST_FAKE_SF", "http://127.0.0.1:8080")
 REGION = "us-east-1"
 
 

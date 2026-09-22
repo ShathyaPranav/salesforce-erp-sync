@@ -35,7 +35,7 @@ def _now_to_second() -> datetime:
 class Store:
     def __init__(self, clock: Callable[[], datetime] = _now_to_second) -> None:
         self._lock = threading.RLock()
-        self._clock = clock
+        self.clock = clock
         self._ids = itertools.count(1)
         self.accounts: dict[str, Record] = {}
         self.opportunities: dict[str, Record] = {}
@@ -113,7 +113,7 @@ class Store:
 
     def _stamp(self, value: Any) -> datetime:
         if value is None:
-            return self._clock()
+            return self.clock()
         if isinstance(value, datetime):
             return value.astimezone(UTC)
         return parse_datetime_literal(str(value))

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Iterator
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from http.server import ThreadingHTTPServer
 from typing import Any
 
@@ -264,3 +266,20 @@ def test_datetime_literal_offsets_are_normalised_to_utc():
     q = parse("SELECT Id FROM Opportunity WHERE SystemModstamp >= 2026-09-15T14:30:00+05:30")
     value = q.where[0].value
     assert str(value) == "2026-09-15 09:00:00+00:00"
+
+
+def test_frozen_clock_drives_date_header_and_new_stamps(fake_sf):
+    base, _ = fake_sf
+    requests.post(f"{base}/__admin/clock", json={"now": "2026-09-22T10:00:00Z"}, timeout=5)
+    resp = requests.get(f"{base}/services/data/", timeout=5)
+    assert resp.headers["Date"] == "Tue, 22 Sep 2026 10:00:00 GMT"
+    created = requests.put(
+        f"{base}/__admin/opportunities",
+        json=[{"Name": "Clocked", "StageName": "Closed Won", "CloseDate": "2026-09-22"}],
+        timeout=5,
+    ).json()
+    assert created[0]["SystemModstamp"] == "2026-09-22T10:00:00.000+0000"
+
+    requests.post(f"{base}/__admin/clock", json={"now": None}, timeout=5)
+    live = parsedate_to_datetime(requests.get(f"{base}/services/data/", timeout=5).headers["Date"])
+    assert abs((live - datetime.now(UTC)).total_seconds()) < 5

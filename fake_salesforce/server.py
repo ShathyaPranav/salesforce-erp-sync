@@ -16,6 +16,8 @@ inject faults:
   DELETE /__admin/opportunities/ID
   POST   /__admin/faults           {"target": "token"|"query", "status": 503, "count": 1}
   POST   /__admin/revoke-tokens    expire every issued access token
+  POST   /__admin/clock            {"now": "2026-09-22T10:00:00Z"} freezes Salesforce's clock
+                                   (Date headers, new SystemModstamps); {"now": null} unfreezes
 """
 
 from __future__ import annotations
@@ -30,12 +32,13 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote_plus, urlsplit
 
-from fake_salesforce.soql import SoqlError, parse
+from fake_salesforce.soql import SoqlError, parse, parse_datetime_literal
 from fake_salesforce.store import Record, Store
 
 DEFAULT_SEED = Path(__file__).with_name("seed.json")
@@ -90,6 +93,14 @@ class App:
     api_calls: int = 0
     lock: threading.Lock = field(default_factory=threading.Lock)
     locator_ids: itertools.count[int] = field(default_factory=lambda: itertools.count(1))
+    frozen_now: datetime | None = None
+
+    def __post_init__(self) -> None:
+        self.store.clock = lambda: self.now().replace(microsecond=0)
+
+    def now(self) -> datetime:
+        """Salesforce's clock: real time unless a test froze it."""
+        return self.frozen_now or datetime.now(UTC)
 
     def load_seed(self) -> None:
         self.store.reset()
@@ -117,6 +128,12 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
         server_version = "FakeSalesforce/1.0"
 
         # ---- plumbing ---------------------------------------------------------
+
+        def date_time_string(self, timestamp: float | None = None) -> str:
+            # The Date header is Salesforce's clock; the poller reads it.
+            return super().date_time_string(
+                app.now().timestamp() if timestamp is None else timestamp
+            )
 
         def log_message(self, format: str, *args: Any) -> None:
             pass  # we log one JSON line per request in _send instead
@@ -351,6 +368,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     app.tokens.clear()
                     app.cursors.clear()
                     app.faults.clear()
+                    app.frozen_now = None
                     app.requests.clear()
                 if body.get("seed", True):
                     app.load_seed()
@@ -389,6 +407,10 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 with app.lock:
                     app.faults.setdefault(body["target"], []).append(fault)
                 self._send(200, {"ok": True})
+            elif path == "/__admin/clock" and method == "POST":
+                now = self._json_body().get("now")
+                app.frozen_now = None if now is None else parse_datetime_literal(now)
+                self._send(200, {"now": app.now().isoformat()})
             elif path == "/__admin/revoke-tokens" and method == "POST":
                 with app.lock:
                     app.tokens.clear()

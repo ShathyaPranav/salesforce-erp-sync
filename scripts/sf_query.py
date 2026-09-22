@@ -3,7 +3,7 @@
 Phase 1.1 is done when a real Salesforce query works from here.
 
     python scripts/sf_query.py                 # your real org, credentials from .env
-    python scripts/sf_query.py --fake          # the local fake on http://localhost:8080
+    python scripts/sf_query.py --fake          # the local fake on http://127.0.0.1:8080
     python scripts/sf_query.py --soql "SELECT Id, Name FROM Opportunity LIMIT 5"
     python scripts/sf_query.py --record tests/contract/fixtures/real_query_response.json
 
@@ -29,7 +29,7 @@ DEFAULT_SOQL = (
     "ORDER BY SystemModstamp ASC, Id ASC"
 )
 FAKE = {
-    "SF_LOGIN_URL": "http://localhost:8080",
+    "SF_LOGIN_URL": "http://127.0.0.1:8080",
     "SF_CLIENT_ID": "fake-client-id",
     "SF_CLIENT_SECRET": "fake-client-secret",
     "SF_API_VERSION": "v66.0",
