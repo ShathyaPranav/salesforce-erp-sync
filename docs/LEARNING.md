@@ -240,3 +240,50 @@ Actions signs a short-lived OIDC token for each workflow run. AWS is configured
 to trust GitHub's token issuer, and my deploy role's trust policy only accepts
 tokens for the `main` branch of my repository. The job exchanges the token for
 temporary credentials, so there's no long-lived secret to rotate or leak.
+
+## Phase 2.3: operating it (built and tested locally; the AWS demo waits on the deploy)
+
+**What I built.** Metrics in `worker/metrics.py` (plus `emitMetric` in
+`ingest/main.go`); three alarms, an SNS alert topic, a dashboard and a saved
+Logs Insights query in `template.yaml`; and `relayctl`, a Go CLI
+(`relayctl/main.go`, with the logic in `relayctl/ops/dlq.go`).
+
+**How it works.** Each Lambda prints one **Embedded Metric Format** line per
+invocation: a JSON log line with an `_aws` block that tells CloudWatch
+"these fields are metrics". CloudWatch turns it into `OrdersWritten`,
+`DuplicatesSkipped`, `TransientRetries` and the rest, with no API call.
+Metrics are counted per dimension combination, so they all share a single
+`Service` dimension: 7 metrics, inside the 10 free.
+
+There are three alarms, and each emails when it fires and when it clears:
+- **DLQ not empty.** A human has to look.
+- **Oldest message over 20 minutes.** That's deliberately above the ~15-minute
+  retry budget, so normal backoff never trips it.
+- **Three failed polls in 10 minutes.** Usually a Salesforce auth problem.
+
+`relayctl dlq redrive` shows the key operational idea: it only moves messages
+*without* a `reason` back to the queue. Those are transient failures that ran
+out of retries. A message with `reason: missing_amount` would just fail again,
+so the fix is to correct the deal in Salesforce and then `relayctl dlq ack` the
+old message. Redrive also deletes from the DLQ only *after* the copy is on the
+main queue, so a crash in the middle leaves a harmless duplicate and never a
+lost message.
+
+**See it yourself.**
+
+```powershell
+docker compose run --rm go go run ./relayctl --local --endpoint http://localstack:4566 stats
+docker compose run --rm go go run ./relayctl --local --endpoint http://localstack:4566 dlq list
+```
+
+The first prints queue depths, the ERP table counts, the watermark and the
+chaos flags. The second lists each dead-letter with its kind (permanent or
+transient) and its reason.
+
+**Interview check.** *The ERP was down for two hours. What happened, and how do
+you recover?* Every message retried with growing delays for about 15 minutes,
+then SQS moved it to the DLQ. The DLQ alarm emailed me, and the queue-age alarm
+didn't fire, because messages were moving, just failing. Once the ERP is back,
+`relayctl dlq redrive` sends the transient failures back. Anything left over is
+caught by the nightly reconciler, and duplicates are harmless because the
+writes are idempotent.
