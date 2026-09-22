@@ -167,3 +167,76 @@ DynamoDB write can succeed a minute later, so it's transient and retried with
 backoff. A deal with no Amount will fail forever, so it's permanent and
 dead-lettered immediately with a reason. Retrying it would only burn the retry
 budget and delay the alert.
+
+## Phase 2.1: infrastructure as code (built and validated; first deploy waits on your approval)
+
+**What I built.** `template.yaml` (AWS SAM: the whole app), `infra/bootstrap.yaml`
+(a one-time stack with the image repository and, later, the GitHub deploy
+role), and `scripts/deploy.py`, `scripts/put_sf_secret.py` and
+`scripts/smoke.py`. `tests/unit/test_template.py` pins the cost and failure
+rules, and both templates pass `sam validate --lint`.
+
+**How it works.** SAM is a shorthand for CloudFormation: `sam build` builds the
+three Docker images, and `sam deploy` pushes them to ECR and creates or updates
+every resource as one stack called `relay-dev`. Every setting that the failure
+handling relies on is written down, not clicked in a console:
+- `FunctionResponseTypes: [ReportBatchItemFailures]` on the worker's SQS trigger;
+- a queue `VisibilityTimeout` of 180 s (6 × the worker's 30 s timeout);
+- `maxReceiveCount: 5`;
+- a DLQ that keeps messages 14 days;
+- `MaximumRetryAttempts: 0` on the poller, so a failed run doesn't overlap the next.
+
+The key idea is **what the stack does *not* own**. The Salesforce secret is a
+SecureString, which CloudFormation can't create, so `put_sf_secret.py` stores
+it once. The watermark and chaos flags are written at runtime, so a redeploy
+can never reset them. There's no `ReservedConcurrentExecutions`, because new
+accounts only have 10 and reserving any fails the deploy. The worker is capped
+with `ScalingConfig.MaximumConcurrency: 2` instead.
+
+**See it yourself.**
+
+```powershell
+docker compose run --rm sam sam validate --lint
+C:\Users\luckf\.venvs\relay\Scripts\python -m pytest tests/unit/test_template.py -v
+```
+
+`template.yaml is a valid SAM Template`, then 8 guard tests pass.
+
+**Interview check.** *Why is the Salesforce secret not in your CloudFormation
+template?* CloudFormation can't create SecureString parameters, and a secret
+in a template ends up in version control and stack history. It's stored once in
+SSM Parameter Store, encrypted with KMS, and the Lambdas read it at cold start
+with `WithDecryption`. The stack only grants them permission to read that one path.
+
+## Phase 2.2: CI/CD (built and linted; first run waits on the GitHub repo)
+
+**What I built.** `.github/workflows/ci.yml`: jobs `lint`, `unit`,
+`integration`, `deploy` and a smoke test, plus the OIDC role in
+`infra/bootstrap.yaml` (`GitHubDeployRole`).
+
+**How it works.** Every push and pull request runs the linters, the unit
+tests, and the whole failure-injection suite on `docker compose` (which also
+builds the three images). Only a push to `main` reaches the `deploy` job. That
+job has `permissions: id-token: write`, so GitHub issues it a signed
+**OIDC token** (a short-lived identity document saying "this is a workflow run
+on main in your repo"). `configure-aws-credentials` trades that token for
+temporary credentials of `relay-github-deploy`, whose trust policy accepts only
+`repo:<you>/<repo>:ref:refs/heads/main`. The key idea is **no stored keys**:
+nothing in GitHub can be leaked and used later, because the credentials expire
+within the hour. After `sam deploy`, `scripts/smoke.py` pushes a unique
+`006SMOKE…` deal through the live queue and waits for its order. Because it's
+unique, it can't pass by finding an old one.
+
+**See it yourself.**
+
+```powershell
+docker run --rm -v "${PWD}:/repo" -w /repo rhysd/actionlint:latest
+```
+
+No output means the workflow is valid (actionlint also runs shellcheck on every `run:` step).
+
+**Interview check.** *How does your pipeline deploy without AWS keys?* GitHub
+Actions signs a short-lived OIDC token for each workflow run. AWS is configured
+to trust GitHub's token issuer, and my deploy role's trust policy only accepts
+tokens for the `main` branch of my repository. The job exchanges the token for
+temporary credentials, so there's no long-lived secret to rotate or leak.
