@@ -20,7 +20,7 @@ flowchart LR
   CLI[relayctl<br/>Go CLI] --> DLQ
 ```
 
-Everything is triggered by EventBridge Scheduler or SQS, so nothing runs (or costs) when idle. There is no VPC, no always-on server, and no web UI: you operate it through `relayctl` and the CloudWatch console.
+Everything is triggered by EventBridge Scheduler or SQS, so almost nothing runs when idle (Lambda's SQS pollers keep long-polling the queue, which stays well inside the free tier). There is no VPC, no always-on server, and no web UI: you operate it through `relayctl` and the CloudWatch console.
 
 **Why polling instead of push?** Salesforce's real-time Change Data Capture streams over a gRPC API with Avro-encoded events and long-lived connections, which fights Lambda's short-lived model. Polling by `SystemModstamp` is how many production connectors work, it's cheap, and it teaches the watermark problem (section on failure handling). Streaming is a stretch goal.
 
@@ -38,22 +38,22 @@ Go covers ingestion and operations (about a quarter of the code); Python covers 
 | Config and secrets | — | SSM Parameter Store | Salesforce client credentials, watermark, chaos flags |
 | Infrastructure | YAML | AWS SAM | Every resource above, as code |
 
-**Salesforce side:** a free Developer Edition org, a connected app using the OAuth 2.0 client credentials flow, and a handful of Accounts and Opportunities you create. No Apex code.
+**Salesforce side:** a free Developer Edition org, an External Client App using the OAuth 2.0 client credentials flow (new orgs can no longer create connected apps), and a handful of Accounts and Opportunities you create. No Apex code.
 
 **Why Go here:** the poller and the CLI are small, stateless programs that talk to HTTP APIs and AWS. Go gives you a single static binary, fast Lambda cold starts, and an easy CLI. The worker stays in Python because mapping and validation are the part you'll iterate on most.
 
 ## Happy path
 
-A deal marked Closed Won shows up in the ERP within about 2 minutes, as one order and one invoice.
+A deal marked Closed Won shows up in the ERP within about 4 minutes (2-minute schedule plus a 2-minute safety lag), as one order and one invoice.
 
-1. **Poll.** The ingest Lambda reads the watermark from SSM, then runs a SOQL query for Opportunities with `StageName = 'Closed Won'` and `SystemModstamp >= watermark`, ordered by `SystemModstamp`.
-2. **Publish.** For each row it sends one SQS message: the Opportunity fields, its Account, and an **event key** = `OpportunityId:SystemModstamp`. Then it advances the watermark to the newest timestamp it published.
+1. **Poll.** The ingest Lambda reads the watermark from SSM and computes an upper bound: Salesforce's own clock (the HTTP `Date` header) minus a 2-minute lag. It runs a SOQL query for Opportunities with `IsWon = true`, `SystemModstamp >= watermark` and `SystemModstamp < upper`, ordered by `SystemModstamp, Id`, following `nextRecordsUrl` until the last page.
+2. **Publish.** For each row it sends one SQS message: the Opportunity fields, its Account, and an **event key** = `OpportunityId:SystemModstamp`. Then it advances the watermark to `upper`. If any send fails, the watermark only moves up to the first record that wasn't published.
 3. **Consume.** SQS invokes the worker Lambda with a batch of up to 10 messages.
 4. **Validate and map.** The worker checks required fields and maps Salesforce fields to ERP fields (Account → customer, Amount → order total, CloseDate → order date).
 5. **Write.** One DynamoDB transaction upserts the customer, writes the order, and writes the invoice. The order write is conditional: it succeeds only if the order doesn't exist or the incoming version is newer.
 6. **Acknowledge.** The worker reports success for that message, and SQS deletes it.
 
-Step 2 uses `>=`, not `>`, on purpose. Two records can share a timestamp, and a strict `>` can skip one forever. Re-reading the boundary means some events are published twice, which is fine because step 5 is idempotent.
+The window is half-open, `[watermark, upper)`, on purpose. `>=` on the lower bound means a record stamped exactly at the boundary is never skipped (a strict `>` can lose one of two records that share a timestamp). `<` on the upper bound, with the watermark set to `upper`, means consecutive windows tile time exactly, so nothing is re-published on every poll. The 2-minute lag exists because Salesforce stamps `SystemModstamp` when a record is written, not when its transaction commits: a slow transaction can become visible after the poller has moved past its timestamp. Staying 2 minutes behind Salesforce's clock gives commits time to land. Anything that still slips through is found by the reconciler. Re-publishing is always safe, because step 5 is idempotent.
 
 ## Failure handling
 
@@ -65,9 +65,9 @@ This section is the project. Each row is a failure you trigger on purpose, with 
 | ERP unavailable | Chaos flag makes the ERP layer throw a throttling error at a set rate | Classified as **transient**: the worker sets the message's visibility timeout to `base × 2^attempt + jitter` and reports it failed, so SQS retries later. After 5 receives, SQS moves it to the DLQ |
 | Bad data | Opportunity with no Amount or no Account | Classified as **permanent**: retrying cannot fix it. The worker sends it straight to the DLQ with a `reason` attribute and deletes the original |
 | Out-of-order updates | A deal is edited twice; SQS delivers the newer edit first | Each order stores its version (`SystemModstamp`). An older version fails the condition and is dropped as stale |
-| Worker crashes mid-batch | Lambda timeout or exception after some writes | Partial batch responses report only the failed message IDs; the rest are deleted. Redelivered ones hit idempotency |
+| Worker crashes mid-batch | Lambda timeout or exception after some writes | An unhandled exception or timeout fails the *whole* batch, so all 10 messages come back. Already-written ones hit the version check and do nothing. To keep one bad message from failing the rest, the worker catches errors per message and returns only the failed IDs (`ReportBatchItemFailures`) |
 | Write succeeded, ack lost | ERP transaction commits, then the Lambda dies before SQS deletes the message | Redelivery hits the conditional write and becomes a no-op. This is why no outbox table is needed here |
-| Poller misses a record | Watermark bug, Salesforce outage, clock skew | The nightly reconciler finds Closed Won deals with no matching order and re-enqueues them |
+| Poller misses a record | A transaction commits later than the 2-minute lag, or a watermark bug | The nightly reconciler finds Closed Won deals with no order, or whose order is at an older version, and re-enqueues the valid ones |
 | Deal deleted or reverted in Salesforce | Stage changes back from Closed Won | Out of scope for sync; the reconciler reports it as drift for a human to decide. Say this plainly |
 
 **The core idea to explain in interviews:** you can't get exactly-once *delivery* across two systems, but you can get exactly-once *effect* with at-least-once delivery plus idempotent writes. Every row above is a consequence of that one decision.
@@ -82,7 +82,7 @@ Expected cost: well under $1 a month, and close to zero within the always-free l
 | --- | --- | --- |
 | Lambda | Poller every 2 min ≈ 22K invocations a month, plus worker and reconciler | 1M requests, 400K GB-seconds a month |
 | SQS | A few tens of thousands of requests a month (Lambda's polling counts) | 1M requests a month |
-| DynamoDB | Three small tables, on-demand or 5 RCU/WCU each | 25 GB, 25 RCU/WCU provisioned |
+| DynamoDB | Three small tables, provisioned at 5 RCU/WCU each (on-demand is not in the always-free tier) | 25 GB, 25 RCU/WCU provisioned |
 | CloudWatch | About 6 custom metrics, 3 alarms, 1 dashboard | 10 metrics, 10 alarms |
 | ECR (private) | 3 images, a few hundred MB | Not free: about $0.10 per GB-month, so a few cents |
 | SSM Parameter Store | Standard parameters | Free |
@@ -186,7 +186,7 @@ Day 1 builds the whole pipeline locally, with every failure case tested; day 2 p
 
 | Phase | Work | Done when |
 | --- | --- | --- |
-| 1.1 Setup | Repo skeleton, docker compose with LocalStack, fake Salesforce stub, DynamoDB table design. You: Salesforce Developer Edition org, connected app, sample data, $1 AWS Budget alert | `docker compose up` runs; a real Salesforce query works from the command line |
+| 1.1 Setup | Repo skeleton, docker compose with LocalStack, fake Salesforce stub, DynamoDB table design. You: Salesforce Developer Edition org, External Client App, sample data, $1 AWS Budget alert | `docker compose up` runs; a real Salesforce query works from the command line |
 | 1.2 Ingest | Go poller: OAuth, SOQL, watermark with `>=`, publish to SQS | Poller publishes correct messages locally, including equal-timestamp cases |
 | 1.3 Sync | Python worker: validation, mapping, transactional ERP write with idempotency and version checks | Happy path, duplicate and out-of-order tests pass |
 | 1.4 Failures | Transient vs permanent errors, backoff via visibility timeout, DLQ, partial batch responses, chaos flags | Every row of the failure table has a passing test (**minimum credible project**) |
@@ -196,6 +196,25 @@ Day 1 builds the whole pipeline locally, with every failure case tested; day 2 p
 | 2.4 Polish | README with architecture diagram, failure table linked to tests, cost notes, 2-minute demo script | Someone else could clone, run and understand it |
 
 The 2 days are building time. Budget extra time afterwards to read the four core pieces (idempotent write, error classification, watermark, reconciliation) until you can explain every line: that's what the interview tests.
+
+## Design decisions, 23 Sep 2026
+
+Agreed after reviewing the plan against AWS and Salesforce behaviour. Where these differ from the sections above, these win.
+
+| Decision | Why |
+| --- | --- |
+| Lagged half-open poll window, watermark = upper bound (Happy path) | The original `watermark = newest published stamp` re-sent the newest deal on every poll forever, and missed late-committing transactions |
+| `IsWon = true` instead of `StageName = 'Closed Won'` | `IsWon` is set by Salesforce from the stage *type*, so renaming or adding a won stage can't break the sync |
+| Local stand-in for the SQS trigger (`esm-pump`, test harness only) | The Lambda images' built-in emulator only answers direct invokes, and free LocalStack can't run image Lambdas. The pump reproduces the event source mapping's rules; the deployed smoke test covers the real one |
+| LocalStack pinned to 4.14.0 | The last release that runs without an account token. Fidelity tests guard the behaviours the failure suite relies on; `motoserver/moto` is the fallback |
+| Error classification: condition failed on the order = duplicate or stale (ack); throttling, transaction conflicts, timeouts and unknown errors = transient (retry); missing Amount/Account or unmappable fields = permanent (DLQ) | Unknown errors default to transient because the retry budget (5 receives) bounds them anyway, while wrongly dead-lettering good data loses work |
+| Backoff base and cap are settings (1 s locally, 30 s on AWS, cap 15 min) | Keeps the 100%-failure test fast. With 5 receives the retry budget is roughly 15 minutes, so a longer ERP outage lands in the DLQ and is recovered by `relayctl dlq redrive` or the reconciler |
+| Reconciler compares versions, validates before re-enqueueing, and only reports reverted or deleted deals | Re-enqueueing invalid deals would refill the DLQ every night; comparing versions catches missed updates, not just missed deals |
+| No `ReservedConcurrentExecutions`; the poller's async retries are set to 0 | New AWS accounts start with a concurrency limit of 10, and reserving any of it fails the deploy. The next scheduled run is the retry |
+| Salesforce secret is created by hand as an SSM SecureString | CloudFormation can't create SecureString parameters. The watermark and chaos flags are written at runtime, so the stack doesn't own them either |
+| Known limit: two edits of one deal in the same second share a version | Salesforce timestamps have one-second precision. The lag means the poller always reads a second's final state; the reconciler reports any leftover mismatch |
+
+**Wording for interviews:** at-least-once delivery plus idempotent, version-guarded writes. Each valid Closed Won deal produces at most one order and one invoice, which converge to the latest Salesforce version. Invalid deals are dead-lettered with a reason, and the nightly reconciler finds anything missed.
 
 ## What not to build
 
