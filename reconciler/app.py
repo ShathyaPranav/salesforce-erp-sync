@@ -17,6 +17,7 @@ from erp.schema import ORDERS
 from reconciler.reconcile import WON_SOQL, compare, scan_order_versions, stage_lookup
 from reconciler.salesforce import Salesforce
 from worker.logs import log
+from worker.metrics import emit
 
 PREFIX = os.environ.get("RELAY_PARAM_PREFIX", "/relay")
 QUEUE_NAME = os.environ.get("QUEUE_NAME", "relay-events")
@@ -73,6 +74,7 @@ def handler(event: dict[str, Any] | None, context: Any) -> dict[str, Any]:
         "items": [d.__dict__ for d in report.drift],
     }
     log("info", "reconcile complete", **{k: v for k, v in summary.items() if k != "items"})
+    emit("reconciler", {"DriftFound": len(report.drift)})
     return summary
 
 

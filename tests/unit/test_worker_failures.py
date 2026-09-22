@@ -209,3 +209,18 @@ def test_missing_chaos_parameters_mean_chaos_off():
     assert chaos == Chaos(erp_fail_rate=0.0, crash_after=0)
     chaos.maybe_fail_erp()
     chaos.maybe_crash(processed=100)
+
+
+def test_one_emf_metrics_line_per_invocation(aws, capsys):
+    aws["dynamodb"].error_code = None
+    batch = [good("a"), no_amount("b")]
+    app.handler({"Records": batch}, Ctx(60_000))
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    [emf] = [line for line in lines if "_aws" in line]
+    spec = emf["_aws"]["CloudWatchMetrics"][0]
+    assert spec["Namespace"] == "Relay"
+    assert spec["Dimensions"] == [["Service"]]  # one dimension: stays inside the free tier
+    assert emf["Service"] == "worker"
+    assert emf["OrdersWritten"] == 1
+    assert emf["DeadLettered"] == 1
+    assert emf["TransientRetries"] == 0

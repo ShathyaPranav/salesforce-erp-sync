@@ -14,6 +14,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -73,7 +74,30 @@ func handler(ctx context.Context) (response, error) {
 		return out, err
 	}
 	logger.Info("poll complete", "from", out.From, "to", out.To, "found", out.Found, "published", out.Published)
+	emitMetric("EventsPublished", out.Published)
 	return out, nil
+}
+
+// emitMetric writes one CloudWatch Embedded Metric Format record: a JSON log
+// line CloudWatch turns into a custom metric, with no API call. Same shape and
+// single Service dimension as the Python side (worker/metrics.py).
+func emitMetric(name string, value int) {
+	record := map[string]any{
+		"_aws": map[string]any{
+			"Timestamp": time.Now().UnixMilli(),
+			"CloudWatchMetrics": []any{map[string]any{
+				"Namespace":  "Relay",
+				"Dimensions": [][]string{{"Service"}},
+				"Metrics":    []any{map[string]string{"Name": name, "Unit": "Count"}},
+			}},
+		},
+		"Service": "ingest",
+		name:      value,
+	}
+	line, err := json.Marshal(record)
+	if err == nil {
+		_, _ = fmt.Fprintln(os.Stdout, string(line))
+	}
 }
 
 func getPoller(ctx context.Context) (*poller.Poller, error) {

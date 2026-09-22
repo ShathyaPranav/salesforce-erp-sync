@@ -29,6 +29,7 @@ from worker.chaos import Chaos
 from worker.classify import Kind, classify
 from worker.logs import log
 from worker.mapping import parse_body, to_order
+from worker.metrics import emit
 
 PREFIX = os.environ.get("RELAY_PARAM_PREFIX", "/relay")
 DLQ_NAME = os.environ.get("DLQ_NAME", "relay-events-dlq")
@@ -52,23 +53,46 @@ def client(service: str) -> Any:
     return _clients[service]
 
 
+# Outcome of one record -> the metric it counts towards.
+METRIC_FOR = {
+    "written": "OrdersWritten",
+    "duplicate": "DuplicatesSkipped",
+    "stale": "StaleVersionsDropped",
+    "retry": "TransientRetries",
+    "dead_lettered": "DeadLettered",
+}
+RETRY_OUTCOMES = {"retry", "dlq_send_failed"}
+
+
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     chaos = Chaos.load(client("ssm"), PREFIX)
     records = event.get("Records", [])
     failures: list[dict[str, str]] = []
-    for i, record in enumerate(records):
-        if _out_of_time(context):
-            log("warn", "near timeout, returning unprocessed records", remaining=len(records) - i)
-            failures.extend({"itemIdentifier": r["messageId"]} for r in records[i:])
-            break
-        if not handle_record(record, chaos):
-            failures.append({"itemIdentifier": record["messageId"]})
-        chaos.maybe_crash(processed=i + 1)
+    counts = dict.fromkeys(METRIC_FOR.values(), 0)
+    try:
+        for i, record in enumerate(records):
+            if _out_of_time(context):
+                log(
+                    "warn",
+                    "near timeout, returning unprocessed records",
+                    remaining=len(records) - i,
+                )
+                failures.extend({"itemIdentifier": r["messageId"]} for r in records[i:])
+                break
+            outcome = handle_record(record, chaos)
+            if outcome in METRIC_FOR:
+                counts[METRIC_FOR[outcome]] += 1
+            if outcome in RETRY_OUTCOMES:
+                failures.append({"itemIdentifier": record["messageId"]})
+            chaos.maybe_crash(processed=i + 1)
+    finally:
+        emit("worker", counts)
     return {"batchItemFailures": failures}
 
 
-def handle_record(record: dict[str, Any], chaos: Chaos) -> bool:
-    """Process one record. Returns False if SQS should redeliver it."""
+def handle_record(record: dict[str, Any], chaos: Chaos) -> str:
+    """Process one record and return its outcome: written, duplicate, stale,
+    dead_lettered (all acknowledged), or retry / dlq_send_failed (redelivered)."""
     event_key = _event_key(record)
     attempt = int(record.get("attributes", {}).get("ApproximateReceiveCount", "1"))
     try:
@@ -76,7 +100,8 @@ def handle_record(record: dict[str, Any], chaos: Chaos) -> bool:
     except Exception as exc:
         decision = classify(exc)
         if decision.kind is Kind.PERMANENT:
-            return dead_letter(record, decision.reason, str(exc), event_key)
+            parked = dead_letter(record, decision.reason, str(exc), event_key)
+            return "dead_lettered" if parked else "dlq_send_failed"
         delay = next_visibility_timeout(attempt, BACKOFF_BASE, BACKOFF_CAP)
         log(
             "warn",
@@ -88,9 +113,9 @@ def handle_record(record: dict[str, Any], chaos: Chaos) -> bool:
             retry_in_s=delay,
         )
         _delay_redelivery(record, delay)
-        return False
+        return "retry"
     log("info", result.value, event_key=event_key, attempt=attempt)
-    return True
+    return result.value
 
 
 def process(record: dict[str, Any], chaos: Chaos) -> WriteResult:
