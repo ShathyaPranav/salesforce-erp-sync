@@ -23,7 +23,7 @@ from botocore.exceptions import ClientError
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from erp.schema import ALL_TABLES
 
-ENDPOINT = os.environ.get("AWS_ENDPOINT_URL", "http://localhost:4566")
+ENDPOINT = os.environ.get("AWS_ENDPOINT_URL", "http://127.0.0.1:4566")
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 QUEUE = os.environ.get("QUEUE_NAME", "relay-events")
 DLQ = os.environ.get("DLQ_NAME", "relay-events-dlq")
