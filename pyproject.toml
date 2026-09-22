@@ -31,7 +31,7 @@ select = [
 python_version = "3.12"
 strict = true
 warn_unreachable = true
-files = ["erp", "fake_salesforce", "scripts", "tests"]
+files = ["erp", "fake_salesforce", "scripts", "tests", "worker"]
 
 [[tool.mypy.overrides]]
 module = ["tests.*"]
