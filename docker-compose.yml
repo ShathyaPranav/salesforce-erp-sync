@@ -4,6 +4,7 @@
 #   bootstrap        one-shot: creates queues, tables and parameters, then exits
 #   ingest           the Go poller Lambda image          http://localhost:9001
 #   worker           the Python sync worker Lambda image  http://localhost:9002
+#   reconciler       the nightly reconciler Lambda image  http://localhost:9003
 #   esm-pump         test harness: feeds the queue to the worker like Lambda would
 #
 # LocalStack is pinned to 4.14.0, the last community release that starts
@@ -50,6 +51,9 @@ services:
     environment:
       <<: *aws-local
       FAKE_SF_URL: http://fake-salesforce:8080
+      # Short, so tests of a crashed batch don't wait long for redelivery. On
+      # AWS it must be at least the worker's timeout (template.yaml).
+      QUEUE_VISIBILITY_TIMEOUT: "10"
     volumes:
       - ./erp:/work/erp:ro
       - ./scripts:/work/scripts:ro
@@ -94,6 +98,23 @@ services:
       DLQ_NAME: relay-events-dlq
       BACKOFF_BASE_SECONDS: "1"
       BACKOFF_CAP_SECONDS: "900"
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+
+  # The reconciler Lambda image. Invoke with {} or {"dry_run": true}.
+  reconciler:
+    build:
+      context: .
+      dockerfile: reconciler/Dockerfile
+    image: relay-reconciler
+    ports:
+      - "127.0.0.1:9003:8080"
+    environment:
+      <<: *aws-local
+      RELAY_PARAM_PREFIX: /relay
+      QUEUE_NAME: relay-events
+      RECONCILE_GRACE_MINUTES: "10"
     depends_on:
       bootstrap:
         condition: service_completed_successfully

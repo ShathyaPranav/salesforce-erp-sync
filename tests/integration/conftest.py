@@ -8,6 +8,7 @@ If it isn't running these tests are skipped, unless RELAY_REQUIRE_STACK=1
 from __future__ import annotations
 
 import os
+import uuid
 from collections.abc import Iterator
 from typing import Any
 
@@ -98,3 +99,33 @@ def pump_paused() -> Iterator[None]:
 @pytest.fixture
 def pump_running() -> None:
     pump("resume")
+
+
+@pytest.fixture
+def clean_queue(sqs: Any) -> str:
+    """Main queue and DLQ emptied (with the pump paused, so nothing is in
+    flight), then the pump feeding the worker again."""
+    urls: list[str] = [
+        sqs.get_queue_url(QueueName=n)["QueueUrl"] for n in ("relay-events", "relay-events-dlq")
+    ]
+    pump("pause")
+    try:
+        for url in urls:
+            while True:
+                got = sqs.receive_message(QueueUrl=url, MaxNumberOfMessages=10, WaitTimeSeconds=1)
+                if not got.get("Messages"):
+                    break
+                for m in got["Messages"]:
+                    sqs.delete_message(QueueUrl=url, ReceiptHandle=m["ReceiptHandle"])
+    finally:
+        pump("resume")
+    return urls[0]
+
+
+@pytest.fixture
+def opp_id(ddb: Any) -> Iterator[str]:
+    """A fresh 18-character Opportunity ID; its ERP items are removed afterwards."""
+    oid = f"006T{uuid.uuid4().hex[:14].upper()}"
+    yield oid
+    ddb.delete_item(TableName="orders", Key={"order_id": {"S": oid}})
+    ddb.delete_item(TableName="invoices", Key={"invoice_id": {"S": f"INV-{oid}"}})

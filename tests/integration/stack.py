@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable
 from datetime import datetime
@@ -86,3 +87,48 @@ def delete_erp(ddb: Any, order_id: str, customer_id: str | None = None) -> None:
     ddb.delete_item(TableName="invoices", Key={"invoice_id": {"S": f"INV-{order_id}"}})
     if customer_id:
         ddb.delete_item(TableName="customers", Key={"customer_id": {"S": customer_id}})
+
+
+# ---- sending events and watching them settle -------------------------------------
+
+RECONCILER = "http://127.0.0.1:9003/2015-03-31/functions/function/invocations"
+PUMP_STATS = "http://127.0.0.1:9100/stats"
+
+
+def send(sqs: Any, url: str, event: dict[str, Any]) -> None:
+    """Put one event on the queue, exactly as the poller would."""
+    sqs.send_message(
+        QueueUrl=url,
+        MessageBody=json.dumps(event),
+        MessageAttributes={"event_key": {"DataType": "String", "StringValue": event["event_key"]}},
+    )
+
+
+def settled(sqs: Any, url: str, timeout: float = 30.0) -> None:
+    wait_for(
+        lambda: queue_is_empty(sqs, url), timeout=timeout, what="the worker to drain the queue"
+    )
+
+
+def pump_stats() -> dict[str, int]:
+    stats: dict[str, int] = requests.get(PUMP_STATS, timeout=5).json()
+    return stats
+
+
+def set_chaos(ssm: Any, erp_fail_rate: float = 0.0, crash_after: int = 0) -> None:
+    ssm.put_parameter(
+        Name="/relay/chaos/erp_fail_rate", Value=str(erp_fail_rate), Type="String", Overwrite=True
+    )
+    ssm.put_parameter(
+        Name="/relay/chaos/worker_crash_after",
+        Value=str(crash_after),
+        Type="String",
+        Overwrite=True,
+    )
+
+
+def invoke_reconciler(event: dict[str, Any] | None = None) -> dict[str, Any]:
+    resp = requests.post(RECONCILER, data=json.dumps(event or {}), timeout=120)
+    resp.raise_for_status()
+    result: dict[str, Any] = resp.json()
+    return result

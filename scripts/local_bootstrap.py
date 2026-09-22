@@ -42,6 +42,7 @@ PARAMETERS: dict[str, tuple[str, str]] = {
     f"{PREFIX}/salesforce/client_secret": ("fake-client-secret", "SecureString"),
     f"{PREFIX}/ingest/watermark": ("1970-01-01T00:00:00.000Z", "String"),
     f"{PREFIX}/chaos/erp_fail_rate": ("0", "String"),
+    f"{PREFIX}/chaos/worker_crash_after": ("0", "String"),
 }
 
 
@@ -108,7 +109,8 @@ def create_queues() -> None:
 def put_parameters(overwrite_watermark: bool) -> None:
     ssm = session().client("ssm", endpoint_url=ENDPOINT)
     for name, (value, ptype) in PARAMETERS.items():
-        is_state = name.endswith("/watermark") or name.endswith("/erp_fail_rate")
+        # Runtime state (written by the poller and relayctl) survives a re-run.
+        is_state = name.endswith("/watermark") or "/chaos/" in name
         if is_state and not overwrite_watermark:
             try:
                 ssm.get_parameter(Name=name)
