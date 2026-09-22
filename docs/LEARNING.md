@@ -125,3 +125,45 @@ its visibility timeout and is delivered a second time. The write's condition
 sees the same version already stored and does nothing, so the retry is
 harmless. This is exactly-once *effect* from at-least-once *delivery*, and
 it's why Relay needs no outbox table.
+
+## Phase 1.4: failure handling (the minimum credible project)
+
+**What I built.** `worker/classify.py` (transient or permanent),
+`worker/backoff.py` (retry delays), `worker/chaos.py` (failures you can switch
+on), the three outcomes in `worker/app.py` `handle_record`, the reconciler's
+core in `reconciler/reconcile.py`, and `tests/integration/test_failures.py`:
+one test per row of the failure table.
+
+**How it works.** When a record fails, `classify` decides its fate.
+**Permanent** errors (no Amount, no Account, bad fields) can never succeed on
+retry, so `dead_letter` copies the message to the DLQ with a `reason`
+attribute and the original is deleted. **Transient** errors (throttling, a
+transaction conflict, anything unexpected) might succeed later. So the worker
+sets that message's **visibility timeout** (how long SQS hides a received
+message before handing it out again) to `base × 2^(attempt-1) + jitter`, and
+returns its ID in `batchItemFailures`. SQS redelivers it after that delay, and
+the queue's redrive policy moves it to the DLQ after 5 receives. The key idea is
+that **the queue does the waiting, not the Lambda**: no `sleep`, no paying for
+idle time, and a crash mid-retry loses nothing. Unknown errors count as
+transient on purpose, because 5 receives bounds the cost of being wrong. The
+reconciler compares every Closed Won deal with the ERP: it re-sends missing or
+out-of-date orders, and only *reports* invalid, reverted or deleted deals,
+because those need a human.
+
+**See it yourself.**
+
+```powershell
+C:\Users\luckf\.venvs\relay\Scripts\python -m pytest tests/integration/test_failures.py -v
+docker compose logs worker | Select-String '"retry"|"dead_lettered"'
+```
+
+Nine passing tests named after the failure table. The logs show `retry` lines
+with `attempt` 1 to 5 and `retry_in_s` roughly doubling, and a
+`dead_lettered` line with `reason: missing_amount`.
+
+**Interview check.** *How do you decide whether an error is retried or
+dead-lettered?* Ask whether the same message could succeed later. A throttled
+DynamoDB write can succeed a minute later, so it's transient and retried with
+backoff. A deal with no Amount will fail forever, so it's permanent and
+dead-lettered immediately with a reason. Retrying it would only burn the retry
+budget and delay the alert.
