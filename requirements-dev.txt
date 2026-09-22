@@ -1,0 +1,12 @@
+# Tooling for running tests and linters on your machine and in CI.
+# The Lambda images pin their own runtime dependencies in their own requirements.txt.
+boto3==1.43.99
+requests==2.34.2
+PyYAML==6.0.3
+python-dotenv==1.2.3
+pytest==9.1.1
+ruff==0.16.8
+mypy==2.3.1
+boto3-stubs[dynamodb,sqs,ssm,lambda]==1.43.99
+types-requests==2.33.0.20260906
+types-PyYAML==6.0.12.20260906

@@ -1,0 +1,55 @@
+# Relay's local stack. `docker compose up -d` gives you, with no AWS account:
+#   localstack       SQS, DynamoDB and SSM on http://localhost:4566
+#   fake-salesforce  OAuth + REST query API on http://localhost:8080
+#   bootstrap        one-shot: creates queues, tables and parameters, then exits
+#
+# LocalStack is pinned to 4.14.0, the last community release that starts
+# without a LocalStack account. Every newer image (2026.x, :latest) exits with
+# "License activation failed" unless LOCALSTACK_AUTH_TOKEN is set.
+
+name: relay
+
+x-aws-local: &aws-local
+  AWS_ENDPOINT_URL: http://localstack:4566
+  AWS_REGION: us-east-1
+  AWS_DEFAULT_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: test        # LocalStack accepts any credentials
+  AWS_SECRET_ACCESS_KEY: test
+
+services:
+  localstack:
+    image: localstack/localstack:4.14.0
+    ports:
+      - "127.0.0.1:4566:4566"
+    environment:
+      SERVICES: sqs,dynamodb,ssm
+      EAGER_SERVICE_LOADING: "1"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4566/_localstack/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  fake-salesforce:
+    build:
+      context: .
+      dockerfile: fake_salesforce/Dockerfile
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      FAKE_SF_PAGE_SIZE: "2000"
+
+  bootstrap:
+    image: public.ecr.aws/lambda/python:3.12
+    depends_on:
+      localstack:
+        condition: service_healthy
+    environment:
+      <<: *aws-local
+      FAKE_SF_URL: http://fake-salesforce:8080
+    volumes:
+      - ./erp:/work/erp:ro
+      - ./scripts:/work/scripts:ro
+    working_dir: /work
+    entrypoint: ["python3", "scripts/local_bootstrap.py"]
+    restart: "no"

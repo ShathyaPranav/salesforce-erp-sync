@@ -1,0 +1,47 @@
+[project]
+name = "relay"
+version = "0.1.0"
+description = "Salesforce Closed Won -> mock ERP sync with exactly-once effect"
+requires-python = ">=3.12,<3.13"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [".aws-sam"]
+
+[tool.ruff.lint]
+select = [
+  "E", "W",   # pycodestyle
+  "F",        # pyflakes
+  "I",        # import order
+  "B",        # bugbear
+  "UP",       # pyupgrade
+  "SIM",      # simplify
+  "S",        # bandit (security)
+  "RUF",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests use assert and fixed fake credentials by design.
+"tests/**" = ["S101", "S105", "S106"]
+# The fake Salesforce stub binds 0.0.0.0 inside its container and ships fake credentials.
+"fake_salesforce/**" = ["S104", "S105"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+files = ["erp", "fake_salesforce", "scripts", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+  "integration: needs the docker compose stack running (docker compose up -d)",
+]

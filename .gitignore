@@ -1,0 +1,36 @@
+# Secrets: never commit. Copy .env.example to .env and fill it in.
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Go
+/bin/
+*.exe
+*.test
+*.out
+coverage.txt
+
+# AWS SAM
+.aws-sam/
+samconfig.local.toml
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+.DS_Store
+
+# Local scratch
+*.log

@@ -1,0 +1,26 @@
+{
+  "includeCoAuthoredBy": false,
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash",
+      "Edit",
+      "Write",
+      "WebFetch",
+      "WebSearch"
+    ],
+    "ask": [
+      "Bash(aws:*)",
+      "Bash(sam deploy:*)",
+      "Bash(sam delete:*)",
+      "Bash(sam sync:*)",
+      "Bash(git push:*)",
+      "Bash(git config:*)",
+      "Bash(gh:*)",
+      "Bash(sf:*)",
+      "Bash(sudo:*)",
+      "Bash(brew install:*)",
+      "Bash(winget:*)"
+    ]
+  }
+}

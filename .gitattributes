@@ -1,0 +1,6 @@
+# Everything that ends up inside a Linux container must have LF line endings,
+# even though this repo is edited on Windows (core.autocrlf=true).
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.png binary
+*.jpg binary

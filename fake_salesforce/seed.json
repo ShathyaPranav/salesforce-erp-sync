@@ -1,0 +1,19 @@
+{
+  "_comment": "Mirrors the sample data you create in the real Developer Edition org. 006...03 has no Amount, 006...08 has no Account (both are permanent errors). 006...01 and 006...05 share a SystemModstamp (the >= boundary case). 006...04 has been edited twice (12000 -> 15000 -> 18000); only its latest state is stored here, and tests replay the older versions. 006...06 and 006...07 are not Closed Won and must never sync.",
+  "accounts": [
+    {"Id": "001FAKE00000000001", "Name": "Acme Robotics"},
+    {"Id": "001FAKE00000000002", "Name": "Globex Foods"},
+    {"Id": "001FAKE00000000003", "Name": "Initech Software"},
+    {"Id": "001FAKE00000000004", "Name": "Umbrella Health"}
+  ],
+  "opportunities": [
+    {"Id": "006FAKE00000000001", "Name": "Acme - 50 robot arms", "AccountId": "001FAKE00000000001", "Amount": 125000, "CloseDate": "2026-09-01", "StageName": "Closed Won", "SystemModstamp": "2026-09-15T09:00:00.000+0000"},
+    {"Id": "006FAKE00000000005", "Name": "Acme - spare parts", "AccountId": "001FAKE00000000001", "Amount": 9500, "CloseDate": "2026-09-02", "StageName": "Closed Won", "SystemModstamp": "2026-09-15T09:00:00.000+0000"},
+    {"Id": "006FAKE00000000002", "Name": "Globex - cold storage retrofit", "AccountId": "001FAKE00000000002", "Amount": 48000, "CloseDate": "2026-09-05", "StageName": "Closed Won", "SystemModstamp": "2026-09-15T09:05:00.000+0000"},
+    {"Id": "006FAKE00000000003", "Name": "Initech - site licence", "AccountId": "001FAKE00000000003", "Amount": null, "CloseDate": "2026-09-08", "StageName": "Closed Won", "SystemModstamp": "2026-09-15T09:10:00.000+0000"},
+    {"Id": "006FAKE00000000004", "Name": "Umbrella - pilot", "AccountId": "001FAKE00000000004", "Amount": 18000, "CloseDate": "2026-09-10", "StageName": "Closed Won", "SystemModstamp": "2026-09-15T09:20:00.000+0000"},
+    {"Id": "006FAKE00000000006", "Name": "Globex - renewal", "AccountId": "001FAKE00000000002", "Amount": 30000, "CloseDate": "2026-10-30", "StageName": "Negotiation/Review", "SystemModstamp": "2026-09-15T09:30:00.000+0000"},
+    {"Id": "006FAKE00000000007", "Name": "Initech - hardware", "AccountId": "001FAKE00000000003", "Amount": 22000, "CloseDate": "2026-09-12", "StageName": "Closed Lost", "SystemModstamp": "2026-09-15T09:31:00.000+0000"},
+    {"Id": "006FAKE00000000008", "Name": "Orphan deal - no account", "AccountId": null, "Amount": 5000, "CloseDate": "2026-09-14", "StageName": "Closed Won", "SystemModstamp": "2026-09-15T09:40:00.000+0000"}
+  ]
+}
