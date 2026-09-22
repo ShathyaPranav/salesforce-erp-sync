@@ -23,7 +23,7 @@ select = [
 
 [tool.ruff.lint.per-file-ignores]
 # Tests use assert and fixed fake credentials by design.
-"tests/**" = ["S101", "S105", "S106"]
+"tests/**" = ["S101", "S105", "S106", "S311"]
 # The fake Salesforce stub binds 0.0.0.0 inside its container and ships fake credentials.
 "fake_salesforce/**" = ["S104", "S105"]
 
@@ -31,7 +31,7 @@ select = [
 python_version = "3.12"
 strict = true
 warn_unreachable = true
-files = ["erp", "fake_salesforce", "scripts", "tests", "worker"]
+files = ["erp", "fake_salesforce", "reconciler", "scripts", "tests", "worker"]
 
 [[tool.mypy.overrides]]
 module = ["tests.*"]
