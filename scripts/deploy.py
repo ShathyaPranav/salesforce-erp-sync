@@ -32,6 +32,11 @@ def setting(name: str) -> str:
     return value
 
 
+def optional(name: str) -> str:
+    value = os.environ.get(name, "")
+    return "" if value.startswith("<") else value
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter
@@ -53,6 +58,7 @@ def main() -> None:
         f"SalesforceClientId={setting('SF_CLIENT_ID')}",
         f"SalesforceApiVersion={os.environ.get('SF_API_VERSION', 'v66.0')}",
         f"PollerState={args.poller}",
+        f"AlertEmail={optional('ALERT_EMAIL')}",
     ]
     subprocess.run([sam, "build"], cwd=ROOT, check=True)  # noqa: S603 - fixed argv
     deploy = [

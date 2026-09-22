@@ -4,6 +4,7 @@ fails CI before it can reach AWS."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -104,3 +105,31 @@ def test_ecr_lifecycle_never_expires_by_age_alone():
     text = policy["LifecyclePolicy"]["LifecyclePolicyText"]
     assert '"imageCountMoreThan"' in text
     assert '"tagStatus": "untagged", "countType": "sinceImagePushed"' in text
+
+
+def test_dashboard_body_is_valid_json_after_substitution(resources):
+    import json
+
+    template, values = resources["Dashboard"]["Properties"]["DashboardBody"]["!Sub"]
+    rendered = re.sub(r"\$\{[^}]+\}", "x", template)
+    widgets = json.loads(rendered)["widgets"]
+    assert len(widgets) >= 4
+    for name in ("Queue", "Dlq", "Ingest", "Worker", "Reconciler"):
+        assert name in values
+
+
+def test_every_alarm_notifies_and_stays_quiet_without_data(resources):
+    alarms = of_type(resources, "AWS::CloudWatch::Alarm")
+    assert len(alarms) == 3  # inside the free tier's 10
+    for name, alarm in alarms.items():
+        props = alarm["Properties"]
+        assert props["AlarmActions"] == [{"!Ref": "AlertTopic"}], name
+        assert props["OKActions"] == [{"!Ref": "AlertTopic"}], name
+        assert props["TreatMissingData"] == "notBreaching", name
+
+
+def test_emf_metrics_stay_inside_the_free_tier():
+    # 7 metric names x 1 dimension set (Service) = 7 custom metrics; 10 are free.
+    text = (ROOT / "template.yaml").read_text(encoding="utf-8")
+    metrics = set(re.findall(r'"(\w+)", (?:"Service"|"\."), "(?:ingest|worker|reconciler)"', text))
+    assert len(metrics) == 7, metrics

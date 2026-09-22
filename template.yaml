@@ -25,6 +25,15 @@ Parameters:
     Type: String
     Default: /relay
     AllowedPattern: ^/[A-Za-z0-9_/-]+$
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: >
+      Where alarms are emailed. Passed at deploy time (never committed). AWS
+      sends a confirmation email; click it within 48 hours or no alert arrives.
+
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
 
 Globals:
   Function:
@@ -284,7 +293,142 @@ Resources:
               MaximumRetryAttempts: 1
             Input: "{}"
 
+  # ---- alerting ------------------------------------------------------------------------
+  # Three alarms (the free tier allows 10), each notifying on ALARM and on OK.
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+
+  AlertEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  # A human must look: something is in the DLQ. It stays red until the
+  # message is handled (fix the deal in Salesforce, then `relayctl dlq ack`).
+  DeadLetterAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${AWS::StackName}-dlq-not-empty
+      AlarmDescription: Messages in the dead-letter queue. Run `relayctl dlq list`.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions: [{Name: QueueName, Value: !GetAtt EventsDLQ.QueueName}]
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  # The worker is stuck. The threshold is above the ~15-minute retry budget,
+  # so ordinary backoff never trips it.
+  QueueStuckAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${AWS::StackName}-queue-stuck
+      AlarmDescription: The oldest message has waited over 20 minutes; the worker isn't draining the queue.
+      Namespace: AWS/SQS
+      MetricName: ApproximateAgeOfOldestMessage
+      Dimensions: [{Name: QueueName, Value: !GetAtt EventsQueue.QueueName}]
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1200
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  # Three failed polls in 10 minutes (about three runs in a row): usually
+  # Salesforce auth (an expired secret or a changed External Client App).
+  IngestFailingAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${AWS::StackName}-ingest-failing
+      AlarmDescription: The Salesforce poller keeps failing. Check the ingest logs for "poll failed".
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{Name: FunctionName, Value: !Ref IngestFunction}]
+      Statistic: Sum
+      Period: 600
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  # ---- dashboard and the "trace one deal" query ----------------------------------------
+
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub ${AWS::StackName}
+      DashboardBody: !Sub
+        - |
+          {
+            "widgets": [
+              {"type": "metric", "x": 0, "y": 0, "width": 12, "height": 6,
+               "properties": {"title": "Queue depth", "region": "${AWS::Region}", "stat": "Maximum", "period": 60,
+                 "metrics": [["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "${Queue}", {"label": "waiting"}],
+                             [".", "ApproximateNumberOfMessagesNotVisible", ".", ".", {"label": "in flight / backing off"}],
+                             [".", "ApproximateNumberOfMessagesVisible", ".", "${Dlq}", {"label": "dead-letter queue", "color": "#d62728"}]]}},
+              {"type": "metric", "x": 12, "y": 0, "width": 12, "height": 6,
+               "properties": {"title": "Sync outcomes (Relay)", "region": "${AWS::Region}", "stat": "Sum", "period": 300,
+                 "metrics": [["Relay", "EventsPublished", "Service", "ingest"],
+                             [".", "OrdersWritten", ".", "worker"],
+                             [".", "DuplicatesSkipped", ".", "worker"],
+                             [".", "StaleVersionsDropped", ".", "worker"],
+                             [".", "TransientRetries", ".", "worker", {"color": "#ff7f0e"}],
+                             [".", "DeadLettered", ".", "worker", {"color": "#d62728"}],
+                             [".", "DriftFound", ".", "reconciler"]]}},
+              {"type": "metric", "x": 0, "y": 6, "width": 12, "height": 6,
+               "properties": {"title": "Lambda duration (p95, ms)", "region": "${AWS::Region}", "stat": "p95", "period": 300,
+                 "metrics": [["AWS/Lambda", "Duration", "FunctionName", "${Ingest}"],
+                             [".", ".", ".", "${Worker}"],
+                             [".", ".", ".", "${Reconciler}"]]}},
+              {"type": "metric", "x": 12, "y": 6, "width": 12, "height": 6,
+               "properties": {"title": "Lambda errors and throttles", "region": "${AWS::Region}", "stat": "Sum", "period": 300,
+                 "metrics": [["AWS/Lambda", "Errors", "FunctionName", "${Ingest}"],
+                             [".", ".", ".", "${Worker}"],
+                             [".", "Throttles", ".", "${Worker}"]]}},
+              {"type": "alarm", "x": 0, "y": 12, "width": 24, "height": 3,
+               "properties": {"title": "Alarms", "alarms": ["${DlqAlarm}", "${StuckAlarm}", "${IngestAlarm}"]}}
+            ]
+          }
+        - Queue: !GetAtt EventsQueue.QueueName
+          Dlq: !GetAtt EventsDLQ.QueueName
+          Ingest: !Ref IngestFunction
+          Worker: !Ref WorkerFunction
+          Reconciler: !Ref ReconcilerFunction
+          DlqAlarm: !GetAtt DeadLetterAlarm.Arn
+          StuckAlarm: !GetAtt QueueStuckAlarm.Arn
+          IngestAlarm: !GetAtt IngestFailingAlarm.Arn
+
+  # Saved in CloudWatch > Logs Insights > Queries. Replace the ID with any
+  # Opportunity ID to see that deal's whole journey, poll to ERP write.
+  TraceDealQuery:
+    Type: AWS::Logs::QueryDefinition
+    Properties:
+      Name: !Sub ${AWS::StackName}/trace-one-deal
+      LogGroupNames: [!Ref IngestLogGroup, !Ref WorkerLogGroup, !Ref ReconcilerLogGroup]
+      QueryString: |
+        fields @timestamp, service, msg, event_key, reason, attempt, retry_in_s, kind
+        | filter event_key like /006FAKE00000000004/ or opportunity_id = "006FAKE00000000004"
+        | sort @timestamp asc
+        | limit 200
+
 Outputs:
+  DashboardUrl:
+    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${AWS::StackName}
+  AlertTopicArn:
+    Value: !Ref AlertTopic
   QueueUrl:
     Value: !Ref EventsQueue
   DeadLetterQueueUrl:

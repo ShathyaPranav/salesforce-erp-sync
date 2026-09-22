@@ -6,8 +6,8 @@
 #
 # Repository variables the deploy job reads (Settings > Secrets and variables >
 # Actions > Variables): AWS_DEPLOY_ROLE_ARN, ECR_REPOSITORY_URI, SF_LOGIN_URL,
-# SF_CLIENT_ID. None of them is a secret; the Salesforce client secret lives
-# only in SSM Parameter Store.
+# SF_CLIENT_ID, ALERT_EMAIL. None of them is a secret; the Salesforce client
+# secret lives only in SSM Parameter Store.
 
 name: ci
 
@@ -136,5 +136,6 @@ jobs:
           --parameter-overrides
           "SalesforceLoginUrl=${{ vars.SF_LOGIN_URL }}"
           "SalesforceClientId=${{ vars.SF_CLIENT_ID }}"
+          "AlertEmail=${{ vars.ALERT_EMAIL }}"
       - name: Smoke test the live stack
         run: python scripts/smoke.py --timeout 90
