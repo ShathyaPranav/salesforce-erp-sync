@@ -287,3 +287,86 @@ didn't fire, because messages were moving, just failing. Once the ERP is back,
 `relayctl dlq redrive` sends the transient failures back. Anything left over is
 caught by the nightly reconciler, and duplicates are harmless because the
 writes are idempotent.
+
+## Phase 2.4: polish
+
+**What I built.** `README.md` (architecture diagram, the failure table
+linked to the test for each row, quick start, a two-minute demo, deploying,
+operating, cost, known limits), the exact deploy and GitHub steps in
+`docs/SETUP-CHECKLIST.md` (sections 7–8), and a clean-slate
+`scripts/local_bootstrap.py --reset-state` so the demo always starts from zero.
+
+**How it works.** The README is built around the same idea as the tests:
+every failure the system claims to handle is a row with a named test that
+triggers it. Someone can clone the repo, run `docker compose up` and `pytest`,
+and check each claim without an AWS account. The key idea is
+**reproducibility**. The demo resets to a known state, so it always shows the
+same numbers: 4 orders, 4 invoices, 3 customers, 2 dead-letters with reasons,
+and 0 events on the second poll.
+
+**See it yourself.** Follow "Two-minute demo (local)" in the README from the top.
+
+**Interview check.** *How would you convince me this system is correct?* I'd
+point to the failure table: each row is a failure I trigger on purpose, with an
+integration test that runs through the real queue, worker image and database.
+Then I'd demo one live: break the ERP with the chaos flag, show the retries
+backing off and the DLQ alarm firing, then recover with `relayctl dlq redrive`
+and show that the order count is still right.
+
+## Reading guide: the four core pieces
+
+Read these until you can explain every line. That's what the interview tests.
+For each one, read the code first, then the tests that pin it down.
+
+1. **The idempotent write.** `erp/writer.py`: `write_order`, `_transaction`, `_classify`.
+   Understand:
+   - why the condition is `attribute_not_exists(order_id) OR version < :v`, and
+     what happens for new, newer, the same and older versions;
+   - why only the *order* is conditional, and why all three items share one
+     transaction (a failed condition cancels the invoice and customer too);
+   - why `version` is `SystemModstamp` in epoch milliseconds, stored as a Number
+     (strings compare wrongly across formats);
+   - how `ReturnValuesOnConditionCheckFailure=ALL_OLD` tells *duplicate* from
+     *stale* without a second read.
+
+   Tests: `tests/integration/test_erp_writer.py`, and rows 1, 4 and 6 of
+   `test_failures.py`.
+
+2. **Transient vs permanent errors.** `worker/classify.py` `classify`;
+   `worker/app.py` `handle_record`, `dead_letter` and `_delay_redelivery`;
+   `worker/backoff.py`. Understand:
+   - the one question behind the split: could the same message succeed later?
+   - why unknown errors default to transient (maxReceiveCount 5 caps the cost);
+   - why a permanent error is sent to the DLQ *before* it's acknowledged, and
+     what happens if that send fails;
+   - how the visibility timeout replaces `sleep`;
+   - why `ReportBatchItemFailures` must be on in `template.yaml`.
+
+   Tests: `tests/unit/test_worker_failures.py`, and rows 2, 3 and 5 of
+   `test_failures.py`.
+
+3. **The watermark.** `ingest/poller/poller.go` `Run` and `Query`;
+   `ingest/poller/aws.go` `Publish`. Understand:
+   - the half-open window `[watermark, upper)`: why `>=` below and `<` above,
+     and why the watermark becomes `upper`, not the newest record's stamp;
+   - why `upper` is Salesforce's clock minus 2 minutes (commit lag, no clock skew);
+   - the partial-failure rule (move only to the first unsent event);
+   - what the design can still miss (a commit slower than the lag).
+
+   Tests: `ingest/poller/poller_test.go`, especially
+   `TestIdleOrgPublishesNothingOnTheNextPoll`,
+   `TestEqualTimestampsAreBothPublishedExactlyOnce` and
+   `TestPartialPublishFailureNeverSkipsAnUnsentEvent`; then
+   `tests/integration/test_ingest.py`.
+
+4. **The reconciliation comparison.** `reconciler/reconcile.py` `compare`.
+   Understand:
+   - the six drift kinds, and which get re-enqueued (`missing_order`,
+     `stale_order`) versus only reported;
+   - why a deal is validated before it's re-enqueued;
+   - why recent changes are skipped (the grace period);
+   - why reverts and deletes need a human;
+   - how the golden file (`tests/contract/fixtures/event_golden.json`) keeps the
+     Python and Go event builders identical.
+
+   Tests: `tests/unit/test_reconcile.py`, and rows 7 and 8 of `test_failures.py`.
