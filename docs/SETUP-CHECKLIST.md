@@ -187,13 +187,66 @@ aws sts get-caller-identity --profile relay
 You should see your 12-digit account ID and `user/relay-admin`. The session
 lasts up to 12 hours; run `aws login --profile relay` again when it expires.
 
-## Later (you'll be asked at the right phase)
+## 7. First deploy (Phase 2.1)
 
-* **Phase 2.1:** put the Salesforce secret into SSM as a SecureString. CloudFormation
-  can't create SecureStrings, so this is a manual step: Systems Manager >
-  Parameter Store > Create parameter, name `/relay/salesforce/client_secret`,
-  type SecureString, default key. Using the console keeps it out of your shell
-  history. Approve the first `sam deploy`.
-* **Phase 2.2:** create the GitHub repo, approve the one-time OIDC bootstrap
-  (the role CI assumes has to exist before CI can use it), approve the push.
-* **Phase 2.3:** click **Confirm subscription** in the SNS alarm email within 48 hours (check spam).
+Prerequisites: sections 0 to 6 are done, `.env` is filled in (including
+`ALERT_EMAIL`), `scripts\sf_query.py` works, and `aws login --profile relay`
+is fresh (it lasts up to 12 hours). Every command below creates real
+resources, so either run them yourself or tell Claude "go ahead with the deploy".
+
+```powershell
+# 1. One-time bootstrap: the ECR image repository (with a cleanup policy).
+aws cloudformation deploy --template-file infra/bootstrap.yaml --stack-name relay-bootstrap --profile relay
+
+# 2. The Salesforce secret, into SSM as a SecureString, straight from .env
+#    (never on a command line, never in shell history).
+C:\Users\luckf\.venvs\relay\Scripts\python scripts\put_sf_secret.py --profile relay
+
+# 3. Build the three images and deploy. It shows the change set and asks before applying.
+C:\Users\luckf\.venvs\relay\Scripts\python scripts\deploy.py --profile relay
+```
+
+Then:
+
+1. Click **Confirm subscription** in the "AWS Notification" email (check
+   spam) within 48 hours, or no alarm will ever reach you.
+2. Wait about 4 minutes (the 2-minute schedule plus the 2-minute lag), then:
+   ```powershell
+   go run ./relayctl --profile relay stats       # orders > 0: your real deals arrived
+   go run ./relayctl --profile relay dlq list    # the no-Amount deal, reason missing_amount
+   C:\Users\luckf\.venvs\relay\Scripts\python scripts\smoke.py --profile relay
+   ```
+   That's Phase 2.1's "done when": real Salesforce → real SQS → real DynamoDB.
+3. Edit *Umbrella - pilot* twice now (15000, then 18000) and watch the
+   order's `version` and `revision` change.
+4. **Pause between sessions** so the poller doesn't run all month:
+   `python scripts\deploy.py --profile relay --poller DISABLED`.
+
+## 8. GitHub and CI/CD (Phase 2.2)
+
+1. On github.com create an **empty** repository (no README, no licence), e.g.
+   `relay`. Tell Claude the `owner/repo`; after your OK it adds the remote
+   and pushes `main` with your existing credentials.
+2. Create the OIDC deploy role by re-deploying the bootstrap stack with the repo name:
+   ```powershell
+   aws cloudformation deploy --template-file infra/bootstrap.yaml --stack-name relay-bootstrap --capabilities CAPABILITY_NAMED_IAM --parameter-overrides GitHubRepo=<owner>/<repo> --profile relay
+   aws cloudformation describe-stacks --stack-name relay-bootstrap --query "Stacks[0].Outputs" --profile relay
+   ```
+3. GitHub > repo > Settings > Secrets and variables > Actions > **Variables**
+   (not secrets: none of these is secret):
+
+   | Variable | Value |
+   | --- | --- |
+   | `AWS_DEPLOY_ROLE_ARN` | `DeployRoleArn` from step 2 |
+   | `ECR_REPOSITORY_URI` | `ImageRepositoryUri` from step 2 |
+   | `SF_LOGIN_URL` | same as in `.env` |
+   | `SF_CLIENT_ID` | same as in `.env` |
+   | `ALERT_EMAIL` | your email |
+
+4. The next push to `main` runs lint, the tests, the deploy and the smoke test
+   in the Actions tab. That's Phase 2.2's "done when".
+
+Commits are authored as `ShathyaPranav <s.r.k.shathyapranav@gmail.com>`
+(set in this repository's `.git/config`), and are pushed as the GitHub account
+`ShathyaPranav`. `gh` is logged in to two accounts, so check that
+`gh auth status` shows `ShathyaPranav` as active before pushing.
