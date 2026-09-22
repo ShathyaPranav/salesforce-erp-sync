@@ -1,0 +1,46 @@
+{
+  "_comment": "One contract for both event builders: internal/events (Go, the poller) and reconciler/events.py (Python, the reconciler). Each case is a Salesforce query row and the exact message both must produce from it.",
+  "cases": [
+    {
+      "published_at": "2026-09-22T10:00:00Z",
+      "salesforce_row": {
+        "attributes": {"type": "Opportunity", "url": "/services/data/v66.0/sobjects/Opportunity/006FAKE00000000001"},
+        "Id": "006FAKE00000000001", "Name": "Acme - 50 robot arms", "AccountId": "001FAKE00000000001",
+        "Account": {"attributes": {"type": "Account", "url": "/services/data/v66.0/sobjects/Account/001FAKE00000000001"}, "Name": "Acme Robotics"},
+        "Amount": 125000.5, "CloseDate": "2026-09-01", "StageName": "Closed Won",
+        "SystemModstamp": "2026-09-15T14:30:00.000+0530"
+      },
+      "event": {
+        "schema": "relay.opportunity.v1",
+        "event_key": "006FAKE00000000001:2026-09-15T09:00:00.000Z",
+        "version": 1789462800000,
+        "opportunity": {
+          "id": "006FAKE00000000001", "name": "Acme - 50 robot arms", "stage_name": "Closed Won",
+          "amount": 125000.5, "close_date": "2026-09-01", "account_id": "001FAKE00000000001",
+          "account_name": "Acme Robotics", "system_modstamp": "2026-09-15T09:00:00.000Z"
+        },
+        "published_at": "2026-09-22T10:00:00Z"
+      }
+    },
+    {
+      "published_at": "2026-09-22T10:00:00Z",
+      "salesforce_row": {
+        "attributes": {"type": "Opportunity", "url": "/services/data/v66.0/sobjects/Opportunity/006FAKE00000000008"},
+        "Id": "006FAKE00000000008", "Name": "Orphan deal - no account", "AccountId": null, "Account": null,
+        "Amount": null, "CloseDate": "2026-09-14", "StageName": "Closed Won",
+        "SystemModstamp": "2026-09-15T09:40:00.000+0000"
+      },
+      "event": {
+        "schema": "relay.opportunity.v1",
+        "event_key": "006FAKE00000000008:2026-09-15T09:40:00.000Z",
+        "version": 1789465200000,
+        "opportunity": {
+          "id": "006FAKE00000000008", "name": "Orphan deal - no account", "stage_name": "Closed Won",
+          "amount": null, "close_date": "2026-09-14", "account_id": null,
+          "account_name": null, "system_modstamp": "2026-09-15T09:40:00.000Z"
+        },
+        "published_at": "2026-09-22T10:00:00Z"
+      }
+    }
+  ]
+}
