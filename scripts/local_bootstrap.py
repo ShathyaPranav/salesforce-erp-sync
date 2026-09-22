@@ -5,6 +5,9 @@ from your machine at any time (every step is idempotent):
 
     python scripts/local_bootstrap.py
 
+Add --reset-state for a clean slate: the watermark goes back to the start,
+chaos is switched off, and the ERP tables and both queues are emptied.
+
 This is the local mirror of template.yaml. Names come from the same env vars
 the Lambdas read, so the code under test is configured exactly as on AWS.
 """
@@ -123,12 +126,39 @@ def put_parameters(overwrite_watermark: bool) -> None:
         print(f"param   {name}: set")
 
 
+def wipe_runtime_data() -> None:
+    """Empty the ERP tables and both queues: a clean slate for a demo."""
+    ddb = session().client("dynamodb", endpoint_url=ENDPOINT)
+    for spec in ALL_TABLES:
+        deleted = 0
+        for page in ddb.get_paginator("scan").paginate(
+            TableName=spec.name, ProjectionExpression=spec.partition_key
+        ):
+            for item in page["Items"]:
+                ddb.delete_item(TableName=spec.name, Key=item)
+                deleted += 1
+        print(f"table   {spec.name}: emptied ({deleted} items)")
+    sqs = session().client("sqs", endpoint_url=ENDPOINT)
+    for name in (QUEUE, DLQ):
+        url = sqs.get_queue_url(QueueName=name)["QueueUrl"]
+        while True:
+            got = sqs.receive_message(QueueUrl=url, MaxNumberOfMessages=10, WaitTimeSeconds=1)
+            if not got.get("Messages"):
+                break
+            for m in got["Messages"]:
+                sqs.delete_message(QueueUrl=url, ReceiptHandle=m["ReceiptHandle"])
+        print(f"queue   {name}: emptied")
+
+
 def main() -> None:
+    # --reset-state: watermark back to the start, chaos off, ERP and queues emptied.
     reset = "--reset-state" in sys.argv
     wait_for_endpoint()
     create_tables()
     create_queues()
     put_parameters(overwrite_watermark=reset)
+    if reset:
+        wipe_runtime_data()
     print("bootstrap complete")
 
 

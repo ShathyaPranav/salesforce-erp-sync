@@ -30,6 +30,7 @@ import requests
 from tests.events import make_event
 from tests.integration.conftest import FAKE_SF, pump
 from tests.integration.stack import (
+    delete_erp,
     drain,
     get_item,
     invoke_reconciler,
@@ -182,8 +183,7 @@ def test_5_crash_mid_batch_redelivers_the_batch_safely(sqs, ddb, chaos, clean_qu
         stored = order(ddb, oid)
         assert stored is not None and stored["revision"] == {"N": "1"}, oid
     for oid in ids[1:]:
-        ddb.delete_item(TableName="orders", Key={"order_id": {"S": oid}})
-        ddb.delete_item(TableName="invoices", Key={"invoice_id": {"S": f"INV-{oid}"}})
+        delete_erp(ddb, oid)
 
 
 # ---- 6. Write succeeded, ack lost ---------------------------------------------------------
@@ -251,7 +251,7 @@ def test_7_reconciler_repairs_missed_and_stale_orders(sqs, ddb, fake_sf, clean_q
         for m in dlq_messages(sqs)
     )
     assert drift_for(invoke_reconciler(), missed) is None  # repaired: no drift next run
-    ddb.delete_item(TableName="orders", Key={"order_id": {"S": stale}})
+    delete_erp(ddb, stale)
 
 
 # ---- 8. Deal reverted or deleted in Salesforce ------------------------------------------------
@@ -278,5 +278,5 @@ def test_8_reverted_and_deleted_deals_are_reported_only(sqs, ddb, fake_sf, clean
     assert drift_for(report, deleted) == "not_found"
     # Reported for a human; the orders are left exactly as they were.
     assert order(ddb, reverted) is not None and order(ddb, deleted) is not None
-    ddb.delete_item(TableName="orders", Key={"order_id": {"S": deleted}})
+    delete_erp(ddb, deleted)
     drain(sqs, clean_queue)
