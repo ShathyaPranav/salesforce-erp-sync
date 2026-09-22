@@ -1,0 +1,149 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Relay one-time bootstrap: the image repository all three Lambdas are pushed
+  to, and the role GitHub Actions assumes (via OIDC) to deploy the app stack.
+  Deployed once from a laptop. It has to exist before CI can run, which is why
+  it isn't part of template.yaml: a stack can't create the role that deploys it.
+
+Parameters:
+  GitHubRepo:
+    Type: String
+    Default: ""
+    Description: >
+      owner/repo allowed to deploy, e.g. ShathyaPranav/relay. Leave empty on
+      the first deploy (Phase 2.1); set it in Phase 2.2 to create the OIDC role.
+  AppStackName:
+    Type: String
+    Default: relay-dev
+    Description: Name of the application stack the deploy role may manage.
+
+Conditions:
+  WithGitHub: !Not [!Equals [!Ref GitHubRepo, ""]]
+
+Resources:
+  # One repository for all three images (tags: ingest-*, worker-*, reconciler-*).
+  ImageRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: relay
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      # Rule order matters: untagged layers go fast; otherwise keep the newest
+      # 15 images (5 deploys x 3 functions). Never an age-only rule: deleting
+      # the image a live function uses puts that function in a Failed state.
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Drop untagged images after a day",
+                "selection": {"tagStatus": "untagged", "countType": "sinceImagePushed", "countUnit": "days", "countNumber": 1},
+                "action": {"type": "expire"}
+              },
+              {
+                "rulePriority": 2,
+                "description": "Keep the newest 15 images",
+                "selection": {"tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 15},
+                "action": {"type": "expire"}
+              }
+            ]
+          }
+
+  # GitHub's OIDC identity provider: AWS trusts tokens GitHub signs for a
+  # workflow run, so no long-lived AWS keys are stored in GitHub.
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: WithGitHub
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+
+  GitHubDeployRole:
+    Type: AWS::IAM::Role
+    Condition: WithGitHub
+    Properties:
+      RoleName: relay-github-deploy
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                # Only workflow runs on main in this one repository.
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepo}:ref:refs/heads/main
+      Policies:
+        - PolicyName: deploy-relay
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CloudFormation
+                Effect: Allow
+                Action: cloudformation:*
+                Resource:
+                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AppStackName}/*
+                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:aws:transform/Serverless-2016-10-31
+              - Sid: CloudFormationRead
+                Effect: Allow
+                Action: [cloudformation:ValidateTemplate, cloudformation:GetTemplateSummary, cloudformation:ListStacks]
+                Resource: "*"
+              - Sid: PushImages
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeImages
+                  - ecr:DescribeRepositories
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                  - ecr:SetRepositoryPolicy
+                  - ecr:GetRepositoryPolicy
+                Resource: !GetAtt ImageRepository.Arn
+              - Sid: EcrLogin
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              # CloudFormation creates the app's resources with this role's
+              # permissions, scoped to what template.yaml contains.
+              - Sid: AppResources
+                Effect: Allow
+                Action:
+                  - lambda:*
+                  - sqs:*
+                  - dynamodb:*
+                  - scheduler:*
+                  - logs:*
+                  - cloudwatch:*
+                  - sns:*
+                  - ssm:*
+                Resource: "*"
+              - Sid: AppRoles
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:PassRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRolePolicy
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AppStackName}-*
+
+Outputs:
+  ImageRepositoryUri:
+    Value: !GetAtt ImageRepository.RepositoryUri
+  DeployRoleArn:
+    Condition: WithGitHub
+    Value: !GetAtt GitHubDeployRole.Arn

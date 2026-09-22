@@ -163,6 +163,18 @@ services:
       - gocache:/root/.cache/go-build
     command: ["golangci-lint", "run", "./..."]
 
+  # AWS SAM CLI from AWS's build image, for `sam validate` without installing it:
+  #   docker compose run --rm sam sam validate --lint
+  sam:
+    image: public.ecr.aws/sam/build-python3.12:latest
+    profiles: ["tools"]
+    working_dir: /src
+    volumes:
+      - .:/src
+    environment:
+      AWS_DEFAULT_REGION: us-east-1
+      SAM_CLI_TELEMETRY: "0"
+
 volumes:
   gomod:
   gocache:

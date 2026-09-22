@@ -1,0 +1,303 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Relay: Salesforce Closed Won deals -> SQS -> idempotent writes into a mock
+  ERP on DynamoDB. Everything is event-driven (EventBridge Scheduler and SQS);
+  no VPC, no NAT gateway, nothing billed by the hour.
+
+Parameters:
+  SalesforceLoginUrl:
+    Type: String
+    Description: The org's My Domain URL, e.g. https://xxx-dev-ed.develop.my.salesforce.com
+    AllowedPattern: ^https://.+
+  SalesforceClientId:
+    Type: String
+    Description: External Client App consumer key (the secret is a SecureString created by hand)
+  SalesforceApiVersion:
+    Type: String
+    Default: v66.0
+  PollerState:
+    Type: String
+    Default: ENABLED
+    AllowedValues: [ENABLED, DISABLED]
+    Description: The pause switch. DISABLED stops the 2-minute poll schedule.
+  ParamPrefix:
+    Type: String
+    Default: /relay
+    AllowedPattern: ^/[A-Za-z0-9_/-]+$
+
+Globals:
+  Function:
+    Architectures: [x86_64]
+    MemorySize: 256
+    Environment:
+      Variables:
+        RELAY_PARAM_PREFIX: !Ref ParamPrefix
+        CUSTOMERS_TABLE: !Ref CustomersTable
+        ORDERS_TABLE: !Ref OrdersTable
+        INVOICES_TABLE: !Ref InvoicesTable
+
+Resources:
+  # ---- queues ------------------------------------------------------------------
+
+  EventsDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      # Longer than the main queue: a standard queue keeps a message's original
+      # enqueue time when it moves to the DLQ, so equal retention could expire it early.
+      MessageRetentionPeriod: 1209600 # 14 days
+
+  EventsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      # At least 6x the worker's timeout (AWS guidance for SQS-triggered Lambdas).
+      # The worker overrides it per message for its retry backoff.
+      VisibilityTimeout: 180
+      MessageRetentionPeriod: 345600 # 4 days
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt EventsDLQ.Arn
+        maxReceiveCount: 5
+
+  # ---- the mock ERP ----------------------------------------------------------------
+  # Provisioned 5/5 each: 15 of the 25 always-free RCU/WCU. On-demand is not
+  # in the always-free tier. Throttling under a burst is classified transient.
+
+  CustomersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PROVISIONED
+      ProvisionedThroughput: {ReadCapacityUnits: 5, WriteCapacityUnits: 5}
+      AttributeDefinitions: [{AttributeName: customer_id, AttributeType: S}]
+      KeySchema: [{AttributeName: customer_id, KeyType: HASH}]
+
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PROVISIONED
+      ProvisionedThroughput: {ReadCapacityUnits: 5, WriteCapacityUnits: 5}
+      AttributeDefinitions: [{AttributeName: order_id, AttributeType: S}]
+      KeySchema: [{AttributeName: order_id, KeyType: HASH}]
+
+  InvoicesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PROVISIONED
+      ProvisionedThroughput: {ReadCapacityUnits: 5, WriteCapacityUnits: 5}
+      AttributeDefinitions: [{AttributeName: invoice_id, AttributeType: S}]
+      KeySchema: [{AttributeName: invoice_id, KeyType: HASH}]
+
+  # ---- configuration ------------------------------------------------------------------
+  # Non-secret Salesforce settings. The client secret is a SecureString you
+  # create by hand (CloudFormation can't create SecureStrings), and the
+  # watermark and chaos flags are written at runtime, so none of those are
+  # owned by this stack: a redeploy can never reset them.
+
+  SalesforceLoginUrlParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub ${ParamPrefix}/salesforce/login_url
+      Type: String
+      Value: !Ref SalesforceLoginUrl
+
+  SalesforceClientIdParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub ${ParamPrefix}/salesforce/client_id
+      Type: String
+      Value: !Ref SalesforceClientId
+
+  SalesforceApiVersionParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub ${ParamPrefix}/salesforce/api_version
+      Type: String
+      Value: !Ref SalesforceApiVersion
+
+  # ---- log groups: 7-day retention on every one ------------------------------------------
+  # Named outside /aws/lambda/ and wired in through LoggingConfig, so Lambda
+  # never auto-creates a never-expiring group that races the stack.
+
+  IngestLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /relay/${AWS::StackName}/ingest
+      RetentionInDays: 7
+
+  WorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /relay/${AWS::StackName}/worker
+      RetentionInDays: 7
+
+  ReconcilerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /relay/${AWS::StackName}/reconciler
+      RetentionInDays: 7
+
+  # ---- functions ------------------------------------------------------------------------
+
+  IngestFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      Dockerfile: ingest/Dockerfile
+      DockerContext: .
+      DockerTag: ingest
+    Properties:
+      PackageType: Image
+      Description: Polls Salesforce for changed Closed Won deals and publishes them to SQS
+      Timeout: 60
+      LoggingConfig:
+        LogGroup: !Ref IngestLogGroup
+        LogFormat: Text
+      Environment:
+        Variables:
+          QUEUE_URL: !Ref EventsQueue
+          INGEST_LAG_SECONDS: "120"
+      # Scheduler invokes asynchronously. With retries, a failing run would
+      # overlap the next scheduled one; the next tick is the retry instead.
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+        MaximumEventAgeInSeconds: 60
+      Policies:
+        - Statement:
+            - Sid: SalesforceSettings
+              Effect: Allow
+              Action: [ssm:GetParameter, ssm:GetParameters]
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParamPrefix}/salesforce/*
+            - Sid: Watermark
+              Effect: Allow
+              Action: [ssm:GetParameter, ssm:PutParameter]
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParamPrefix}/ingest/watermark
+            - Sid: DecryptSecretViaSsm
+              Effect: Allow
+              Action: kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt EventsQueue.QueueName
+      Events:
+        Poll:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: rate(2 minutes)
+            State: !Ref PollerState
+            FlexibleTimeWindow: {Mode: "OFF"}
+            RetryPolicy:
+              MaximumRetryAttempts: 0
+              MaximumEventAgeInSeconds: 60
+            Input: "{}"
+
+  WorkerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      Dockerfile: worker/Dockerfile
+      DockerContext: .
+      DockerTag: worker
+    Properties:
+      PackageType: Image
+      Description: Validates each event and writes it to the ERP idempotently
+      Timeout: 30
+      LoggingConfig:
+        LogGroup: !Ref WorkerLogGroup
+        LogFormat: Text
+      Environment:
+        Variables:
+          DLQ_NAME: !GetAtt EventsDLQ.QueueName
+          BACKOFF_BASE_SECONDS: "60"
+          BACKOFF_CAP_SECONDS: "900"
+      Policies:
+        - DynamoDBCrudPolicy: {TableName: !Ref CustomersTable}
+        - DynamoDBCrudPolicy: {TableName: !Ref OrdersTable}
+        - DynamoDBCrudPolicy: {TableName: !Ref InvoicesTable}
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt EventsDLQ.QueueName
+        - Statement:
+            - Sid: ChaosFlags
+              Effect: Allow
+              Action: ssm:GetParameters
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParamPrefix}/chaos/*
+            - Sid: BackoffAndQueueLookup
+              Effect: Allow
+              Action: [sqs:ChangeMessageVisibility, sqs:GetQueueUrl]
+              Resource: [!GetAtt EventsQueue.Arn, !GetAtt EventsDLQ.Arn]
+      Events:
+        Queue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt EventsQueue.Arn
+            BatchSize: 10
+            # Without this, a normal return deletes the WHOLE batch, including
+            # the records the worker reported as failed.
+            FunctionResponseTypes: [ReportBatchItemFailures]
+            # Caps concurrent writers to protect the ERP. Reserves no account
+            # concurrency (new accounts have only 10, so reserving would fail).
+            ScalingConfig:
+              MaximumConcurrency: 2
+
+  ReconcilerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      Dockerfile: reconciler/Dockerfile
+      DockerContext: .
+      DockerTag: reconciler
+    Properties:
+      PackageType: Image
+      Description: Nightly comparison of Salesforce and the ERP; re-enqueues what the poller missed
+      Timeout: 300
+      LoggingConfig:
+        LogGroup: !Ref ReconcilerLogGroup
+        LogFormat: Text
+      Environment:
+        Variables:
+          QUEUE_NAME: !GetAtt EventsQueue.QueueName
+          RECONCILE_GRACE_MINUTES: "10"
+      Policies:
+        - Statement:
+            - Sid: SalesforceSettings
+              Effect: Allow
+              Action: [ssm:GetParameter, ssm:GetParameters]
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParamPrefix}/salesforce/*
+            - Sid: DecryptSecretViaSsm
+              Effect: Allow
+              Action: kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+            - Sid: QueueLookup
+              Effect: Allow
+              Action: sqs:GetQueueUrl
+              Resource: !GetAtt EventsQueue.Arn
+        - DynamoDBReadPolicy: {TableName: !Ref OrdersTable}
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt EventsQueue.QueueName
+      Events:
+        Nightly:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: cron(0 2 * * ? *) # 02:00 UTC
+            FlexibleTimeWindow: {Mode: "OFF"}
+            RetryPolicy:
+              MaximumRetryAttempts: 1
+            Input: "{}"
+
+Outputs:
+  QueueUrl:
+    Value: !Ref EventsQueue
+  DeadLetterQueueUrl:
+    Value: !Ref EventsDLQ
+  OrdersTableName:
+    Value: !Ref OrdersTable
+  InvoicesTableName:
+    Value: !Ref InvoicesTable
+  CustomersTableName:
+    Value: !Ref CustomersTable
+  IngestFunctionName:
+    Value: !Ref IngestFunction
+  WorkerFunctionName:
+    Value: !Ref WorkerFunction
+  ReconcilerFunctionName:
+    Value: !Ref ReconcilerFunction
