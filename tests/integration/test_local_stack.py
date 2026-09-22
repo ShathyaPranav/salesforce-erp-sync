@@ -121,3 +121,15 @@ def test_emulator_returns_old_item_when_transaction_condition_fails(ddb):
         assert dict(reason["Item"])["version"] == {"N": "5"}
     finally:
         ddb.delete_item(TableName="orders", Key={"order_id": {"S": order_id}})
+
+
+def test_smoke_script_passes_against_the_local_stack(clean_queue):
+    result = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, str(REPO / "scripts" / "smoke.py"), "--local", "--timeout", "30"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "PASS" in result.stdout

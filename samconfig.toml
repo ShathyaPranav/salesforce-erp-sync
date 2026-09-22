@@ -1,0 +1,17 @@
+# Settings for `sam build` / `sam deploy`. Nothing account-specific or secret
+# lives here: the image repository and Salesforce settings are passed on the
+# command line by scripts/deploy.py (from .env) or by CI (from GitHub variables).
+version = 0.1
+
+[default.global.parameters]
+stack_name = "relay-dev"
+region = "us-east-1"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+fail_on_empty_changeset = false
