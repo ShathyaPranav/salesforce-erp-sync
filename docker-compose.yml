@@ -2,6 +2,9 @@
 #   localstack       SQS, DynamoDB and SSM on http://localhost:4566
 #   fake-salesforce  OAuth + REST query API on http://localhost:8080
 #   bootstrap        one-shot: creates queues, tables and parameters, then exits
+#   ingest           the Go poller Lambda image          http://localhost:9001
+#   worker           the Python sync worker Lambda image  http://localhost:9002
+#   esm-pump         test harness: feeds the queue to the worker like Lambda would
 #
 # LocalStack is pinned to 4.14.0, the last community release that starts
 # without a LocalStack account. Every newer image (2026.x, :latest) exits with
@@ -74,6 +77,44 @@ services:
       bootstrap:
         condition: service_completed_successfully
       fake-salesforce:
+        condition: service_started
+
+  # The sync worker Lambda image, under the Runtime Interface Emulator.
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    image: relay-worker
+    ports:
+      - "127.0.0.1:9002:8080"
+    environment:
+      <<: *aws-local
+      RELAY_PARAM_PREFIX: /relay
+      QUEUE_NAME: relay-events
+      DLQ_NAME: relay-events-dlq
+      BACKOFF_BASE_SECONDS: "1"
+      BACKOFF_CAP_SECONDS: "900"
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+
+  # Test harness, not a product component: plays Lambda's SQS event source
+  # mapping, which only exists on AWS (see tests/harness/esm_pump.py).
+  esm-pump:
+    image: public.ecr.aws/lambda/python:3.12
+    entrypoint: ["python3", "-u", "/harness/esm_pump.py"]
+    volumes:
+      - ./tests/harness:/harness:ro
+    ports:
+      - "127.0.0.1:9100:9100"
+    environment:
+      <<: *aws-local
+      QUEUE_NAME: relay-events
+      FUNCTION_URL: http://worker:8080/2015-03-31/functions/function/invocations
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+      worker:
         condition: service_started
 
   # ---- developer tools (profile "tools": never started by `up`) --------------

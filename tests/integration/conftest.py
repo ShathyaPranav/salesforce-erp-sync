@@ -76,3 +76,25 @@ def fake_sf() -> Iterator[str]:
     requests.post(f"{FAKE_SF}/__admin/reset", json={"seed": True}, timeout=5).raise_for_status()
     yield FAKE_SF
     requests.post(f"{FAKE_SF}/__admin/reset", json={"seed": True}, timeout=5)
+
+
+# ---- the local event source mapping (tests/harness/esm_pump.py) ----------------
+
+PUMP = os.environ.get("RELAY_TEST_PUMP", "http://127.0.0.1:9100")
+
+
+def pump(action: str) -> None:
+    requests.post(f"{PUMP}/{action}", timeout=30).raise_for_status()
+
+
+@pytest.fixture
+def pump_paused() -> Iterator[None]:
+    """The queue to ourselves: the pump stops feeding the worker until teardown."""
+    pump("pause")
+    yield
+    pump("resume")
+
+
+@pytest.fixture
+def pump_running() -> None:
+    pump("resume")
