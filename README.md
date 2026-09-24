@@ -45,6 +45,22 @@ flowchart LR
 The full design and its reasoning are in [`docs/PLAN.md`](docs/PLAN.md). The
 build log, written for learning the system, is [`docs/LEARNING.md`](docs/LEARNING.md).
 
+## Verified on AWS (25 Sep 2026)
+
+The deployed stack (`relay-dev`, us-east-1), against a real Salesforce
+Developer Edition org:
+
+| What was run | Result |
+| --- | --- |
+| First poll of the org | 23 Closed Won deals published; 21 became orders and invoices within about 2 minutes; the 2 invalid deals (no Amount, no Account) were dead-lettered on their first attempt with `reason` = `missing_amount` / `missing_account` |
+| Smoke test (`scripts/smoke.py`) | a unique synthetic deal went through the live queue and worker and was written, then cleaned up: PASS |
+| Reconciler repair | an order deleted by hand was reported as `missing_order`, re-enqueued and restored; the 2 invalid deals were reported as `invalid_in_source`, not re-sent |
+| 30% ERP chaos + full re-poll | all 23 deals re-published: 20 duplicates skipped, 10 transient retries with backoff of ~60 s then ~137 s, no double orders (still 21) |
+| Alerting | `relay-dev-dlq-not-empty` went to ALARM |
+
+CloudWatch metrics for that session: EventsPublished 46, OrdersWritten 23,
+DuplicatesSkipped 20, TransientRetries 10, DeadLettered 4, DriftFound 3.
+
 ## Failure handling, and the test that proves each row
 
 Every row is a failure triggered on purpose, in

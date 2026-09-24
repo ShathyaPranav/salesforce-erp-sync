@@ -313,6 +313,38 @@ Then I'd demo one live: break the ERP with the chaos flag, show the retries
 backing off and the DLQ alarm firing, then recover with `relayctl dlq redrive`
 and show that the order count is still right.
 
+## Phase 2.1 and 2.3 on AWS: what actually happened
+
+**What I built.** Nothing new: this is the first real deploy of the stack
+(`relay-dev`, 30 resources) against your Developer Edition org, and the
+Phase 2.3 demo run on it. The numbers are in the README under
+"Verified on AWS".
+
+**How it works.** The first scheduled poll published all 23 Closed Won deals.
+The 18 demo deals share one `SystemModstamp` (Salesforce created them in a
+single batch), so the `>=` tie handling was exercised by real data, not only
+by the fake. 21 deals became orders. The two invalid ones went straight to the
+DLQ with a reason, on their first attempt. The key idea proven live is
+**idempotency under a real outage**. With 30% of ERP writes failing and every
+deal re-sent, the worker retried with backoff (≈60 s, then ≈137 s), counted 20
+duplicates, and the order count never moved from 21.
+
+**See it yourself.**
+
+```powershell
+go run ./relayctl --profile relay stats
+go run ./relayctl --profile relay dlq list
+```
+
+In the CloudWatch console, the dashboard `relay-dev` shows the
+`TransientRetries` bump and the DLQ alarm.
+
+**Interview check.** *What did you measure when you ran it for real?* 23
+deals synced from a real Salesforce org, 2 dead-lettered with reasons on
+the first attempt, a hand-deleted order repaired by the reconciler, and
+under 30% injected ERP failures 10 retries and 20 skipped duplicates with no
+double orders.
+
 ## Reading guide: the four core pieces
 
 Read these until you can explain every line. That's what the interview tests.
