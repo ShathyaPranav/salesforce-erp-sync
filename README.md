@@ -2,18 +2,19 @@
 
 [![ci](https://github.com/ShathyaPranav/salesforce-erp-sync/actions/workflows/ci.yml/badge.svg)](https://github.com/ShathyaPranav/salesforce-erp-sync/actions/workflows/ci.yml)
 
-Relay mirrors every Closed Won deal in Salesforce into an ERP as an order and
-an invoice, and keeps it correct when messages repeat, arrive out of order,
-or the ERP is down.
+Relay copies every Closed Won deal in Salesforce into an ERP as an order and
+an invoice. It stays correct when messages arrive twice, arrive out of order,
+or arrive while the ERP is down.
 
-It uses at-least-once delivery plus idempotent, version-guarded writes. Each
-valid Closed Won deal produces at most one order and one invoice, and they
-converge to the latest Salesforce version. Invalid deals are dead-lettered
-with a reason, and a nightly reconciler finds anything the pipeline missed.
+Delivery is at-least-once and every ERP write is idempotent and checked
+against a version, so each valid deal ends up as at most one order and one
+invoice, matching the latest version in Salesforce. Invalid deals go to a
+dead-letter queue with a reason, and a nightly reconciler catches anything
+the pipeline missed.
 
-Everything is serverless on AWS and stays inside the free tier: Go for
-ingestion and the ops CLI, Python for the sync logic, Docker for every
-deployable, GitHub Actions with OIDC for CI/CD. There's no frontend.
+It runs serverless on AWS inside the free tier. The ingestion poller and the
+ops CLI are in Go, the sync logic is in Python, every Lambda ships as a Docker
+image, and GitHub Actions deploys it through OIDC. There's no frontend.
 
 ## Architecture
 
@@ -97,11 +98,12 @@ python -m venv .venv; .venv\Scripts\pip install -r requirements-dev.txt
 docker compose run --rm go go test ./...
 ```
 
-The local stack is:
-- **LocalStack 4.14.0** (SQS, DynamoDB and SSM). It's pinned: it's the last release that runs without an account token.
-- **A fake Salesforce** with the real OAuth and query shapes, plus an admin API for injecting faults.
-- **The three Lambda images**, run under AWS's Runtime Interface Emulator.
-- **A small harness** that plays Lambda's SQS event source mapping, which only exists on AWS.
+The local stack runs LocalStack 4.14.0 for SQS, DynamoDB and SSM (pinned
+because it's the last release that starts without an account token), a fake
+Salesforce with the real OAuth and query response shapes plus an admin API
+for injecting faults, and the three Lambda images under AWS's Runtime
+Interface Emulator. A small test harness stands in for Lambda's SQS event
+source mapping, which only exists on AWS.
 
 ## Two-minute demo (local)
 
@@ -123,23 +125,23 @@ curl.exe -s -d "{}" http://127.0.0.1:9001/2015-03-31/functions/function/invocati
 #    retries back off and the dead-letters land:  docker compose logs -f worker
 python -m pytest tests/integration/test_failures.py -v
 
-# 4. The safety net: compare Salesforce with the ERP and repair the drift.
+# 4. Compare Salesforce with the ERP and repair any drift.
 go run ./relayctl --local reconcile
 ```
 
 Without a local Go install, replace `go run ./relayctl --local` with
 `docker compose run --rm go go run ./relayctl --local --endpoint http://localstack:4566 --reconciler-url http://reconciler:8080/2015-03-31/functions/function/invocations`.
 
-On AWS the same story plays out on the CloudWatch dashboard: run
-`go run ./relayctl --profile relay chaos --erp-fail-rate 0.3` and watch
-`TransientRetries` rise while `OrdersWritten` keeps flowing.
+On AWS you can watch the same thing on the CloudWatch dashboard. Run
+`go run ./relayctl --profile relay chaos --erp-fail-rate 0.3`, and
+`TransientRetries` climbs while `OrdersWritten` keeps counting.
 
 ## Deploying
 
 CI/CD is [`.github/workflows/ci.yml`](.github/workflows/ci.yml). Every push and
 pull request runs the linters, the unit tests and the full failure-injection
 suite on docker compose. A push to `main` then assumes a deploy role through
-**GitHub OIDC** (no AWS keys stored anywhere), runs `sam deploy`, and
+GitHub OIDC (no AWS keys are stored anywhere), runs `sam deploy`, and
 smoke-tests the live stack with a unique synthetic deal.
 
 The first deploy is done once from a laptop, following
@@ -163,22 +165,32 @@ A rollback is `git revert`, followed by the normal pipeline.
 
 ## Cost
 
-This is designed to cost nothing inside the AWS free tier, apart from a few
-cents of ECR storage:
-- **No always-on compute.** There's no VPC and no NAT gateway, and nothing bills by the hour.
-- **Lambda and SQS** stay far below their monthly free requests. The worker trigger's idle polling is a few hundred thousand SQS requests a month, against 1M free.
-- **DynamoDB** is provisioned at 5/5 per table, which is 15 of the 25 always-free units.
-- **Custom metrics:** 7, with one dimension each, against 10 free.
-- **Alarms:** 3, against 10 free.
-- **Logs** are kept for 7 days.
-- **ECR:** about $0.10 per GB-month, kept small by a lifecycle policy that holds the newest 15 images.
+Everything fits in the AWS free tier except ECR storage, which costs a few
+cents a month. Nothing bills by the hour: there's no VPC, no NAT gateway and
+no always-on compute.
 
-Use a $1 AWS Budget that **excludes credits** as an early warning, and
-`PollerState=DISABLED` to pause the poller between sessions.
+- Lambda and SQS stay far below their free monthly requests. Even idle, the
+  worker trigger's polling is a few hundred thousand SQS requests a month,
+  against 1M free.
+- DynamoDB is provisioned at 5/5 per table, 15 of the 25 always-free units.
+- There are 7 custom metrics with one dimension each (10 are free) and 3
+  alarms (10 are free).
+- Logs are kept for 7 days.
+- ECR costs about $0.10 per GB-month, and a lifecycle policy keeps only the
+  newest 15 images.
+
+Set a $1 AWS Budget that excludes credits as an early warning, and deploy
+with `PollerState=DISABLED` to pause the poller between sessions.
 
 ## Known limits
 
-- **Same-second edits:** Salesforce timestamps have one-second precision, so two edits of one deal in the same second share a version. The 2-minute lag means the poller always reads a second's final state. The reconciler reports any leftover mismatch.
-- **Metrics are approximate under retries:** a redelivered message counts once as written and again as a duplicate.
-- **Reverted or deleted deals** are reported, not undone. Reversing an issued invoice is a business decision.
-- **One-way sync.** ERP → Salesforce would need conflict resolution and loop prevention: the natural next step.
+- Salesforce timestamps have one-second precision, so two edits of one deal
+  in the same second share a version. Because the poller stays 2 minutes
+  behind, it always reads a second's final state, and the reconciler reports
+  any mismatch left over.
+- Metrics are approximate under retries: a redelivered message counts once
+  as written and again as a duplicate.
+- Reverted or deleted deals are reported, not undone, because reversing an
+  issued invoice is a business decision.
+- The sync is one-way. Sending ERP data back to Salesforce would need conflict
+  resolution and loop prevention, which this project doesn't attempt.
