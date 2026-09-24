@@ -1,0 +1,460 @@
+{
+  "totalSize": 23,
+  "done": true,
+  "records": [
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001Nrz9QAC"
+      },
+      "Id": "006jV000001Nrz9QAC",
+      "Name": "Express Logistics Standby Generator",
+      "AccountId": "001jV00000AjvalQAB",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000AjvalQAB"
+        },
+        "Name": "Express Logistics and Transport"
+      },
+      "Amount": 220000.0,
+      "CloseDate": "2026-06-11",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-19T21:33:01.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001NrzAQAS"
+      },
+      "Id": "006jV000001NrzAQAS",
+      "Name": "GenePoint Standby Generator",
+      "AccountId": "001jV00000AjvapQAB",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000AjvapQAB"
+        },
+        "Name": "GenePoint"
+      },
+      "Amount": 85000.0,
+      "CloseDate": "2026-07-19",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-19T21:33:01.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001NrzDQAS"
+      },
+      "Id": "006jV000001NrzDQAS",
+      "Name": "United Oil SLA",
+      "AccountId": "001jV00000AjvakQAB",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000AjvakQAB"
+        },
+        "Name": "United Oil & Gas Corp."
+      },
+      "Amount": 120000.0,
+      "CloseDate": "2026-09-06",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-19T21:33:01.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001NrzFQAS"
+      },
+      "Id": "006jV000001NrzFQAS",
+      "Name": "Edge Emergency Generator",
+      "AccountId": "001jV00000AjvafQAB",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000AjvafQAB"
+        },
+        "Name": "Edge Communications"
+      },
+      "Amount": 75000.0,
+      "CloseDate": "2026-09-14",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-19T21:33:01.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001NrzGQAS"
+      },
+      "Id": "006jV000001NrzGQAS",
+      "Name": "University of AZ Portable Generators",
+      "AccountId": "001jV00000AjvamQAB",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000AjvamQAB"
+        },
+        "Name": "University of Arizona"
+      },
+      "Amount": 50000.0,
+      "CloseDate": "2026-06-15",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-19T21:33:01.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001NrzKQAS"
+      },
+      "Id": "006jV000001NrzKQAS",
+      "Name": "GenePoint SLA",
+      "AccountId": "001jV00000AjvapQAB",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000AjvapQAB"
+        },
+        "Name": "GenePoint"
+      },
+      "Amount": 30000.0,
+      "CloseDate": "2026-09-11",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-19T21:33:01.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001NrzMQAS"
+      },
+      "Id": "006jV000001NrzMQAS",
+      "Name": "Edge Installation",
+      "AccountId": "001jV00000AjvafQAB",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000AjvafQAB"
+        },
+        "Name": "Edge Communications"
+      },
+      "Amount": 50000.0,
+      "CloseDate": "2026-07-06",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-19T21:33:01.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001NrzNQAS"
+      },
+      "Id": "006jV000001NrzNQAS",
+      "Name": "Edge SLA",
+      "AccountId": "001jV00000AjvafQAB",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000AjvafQAB"
+        },
+        "Name": "Edge Communications"
+      },
+      "Amount": 60000.0,
+      "CloseDate": "2026-06-01",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-19T21:33:01.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001NrzOQAS"
+      },
+      "Id": "006jV000001NrzOQAS",
+      "Name": "Grand Hotels Generator Installations",
+      "AccountId": "001jV00000AjvajQAB",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000AjvajQAB"
+        },
+        "Name": "Grand Hotels & Resorts Ltd"
+      },
+      "Amount": 350000.0,
+      "CloseDate": "2026-08-28",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-19T21:33:01.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001NrzPQAS"
+      },
+      "Id": "006jV000001NrzPQAS",
+      "Name": "United Oil Installations",
+      "AccountId": "001jV00000AjvakQAB",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000AjvakQAB"
+        },
+        "Name": "United Oil & Gas Corp."
+      },
+      "Amount": 270000.0,
+      "CloseDate": "2026-07-11",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-19T21:33:01.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001NrzQQAS"
+      },
+      "Id": "006jV000001NrzQQAS",
+      "Name": "United Oil Refinery Generators",
+      "AccountId": "001jV00000AjvakQAB",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000AjvakQAB"
+        },
+        "Name": "United Oil & Gas Corp."
+      },
+      "Amount": 915000.0,
+      "CloseDate": "2026-08-23",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-19T21:33:01.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001NrzRQAS"
+      },
+      "Id": "006jV000001NrzRQAS",
+      "Name": "Burlington Textiles Weaving Plant Generator",
+      "AccountId": "001jV00000AjvagQAB",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000AjvagQAB"
+        },
+        "Name": "Burlington Textiles Corp of America"
+      },
+      "Amount": 235000.0,
+      "CloseDate": "2026-07-21",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-19T21:33:01.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001NrzUQAS"
+      },
+      "Id": "006jV000001NrzUQAS",
+      "Name": "University of AZ SLA",
+      "AccountId": "001jV00000AjvamQAB",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000AjvamQAB"
+        },
+        "Name": "University of Arizona"
+      },
+      "Amount": 90000.0,
+      "CloseDate": "2026-06-19",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-19T21:33:01.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001NrzVQAS"
+      },
+      "Id": "006jV000001NrzVQAS",
+      "Name": "United Oil Installations",
+      "AccountId": "001jV00000AjvakQAB",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000AjvakQAB"
+        },
+        "Name": "United Oil & Gas Corp."
+      },
+      "Amount": 235000.0,
+      "CloseDate": "2026-07-23",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-19T21:33:01.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001NrzWQAS"
+      },
+      "Id": "006jV000001NrzWQAS",
+      "Name": "United Oil Emergency Generators",
+      "AccountId": "001jV00000AjvakQAB",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000AjvakQAB"
+        },
+        "Name": "United Oil & Gas Corp."
+      },
+      "Amount": 440000.0,
+      "CloseDate": "2026-07-05",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-19T21:33:01.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001NrzXQAS"
+      },
+      "Id": "006jV000001NrzXQAS",
+      "Name": "Grand Hotels SLA",
+      "AccountId": "001jV00000AjvajQAB",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000AjvajQAB"
+        },
+        "Name": "Grand Hotels & Resorts Ltd"
+      },
+      "Amount": 90000.0,
+      "CloseDate": "2026-06-08",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-19T21:33:01.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001NrzYQAS"
+      },
+      "Id": "006jV000001NrzYQAS",
+      "Name": "United Oil Standby Generators",
+      "AccountId": "001jV00000AjvakQAB",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000AjvakQAB"
+        },
+        "Name": "United Oil & Gas Corp."
+      },
+      "Amount": 120000.0,
+      "CloseDate": "2026-09-07",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-19T21:33:01.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001NrzZQAS"
+      },
+      "Id": "006jV000001NrzZQAS",
+      "Name": "Grand Hotels Emergency Generators",
+      "AccountId": "001jV00000AjvajQAB",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000AjvajQAB"
+        },
+        "Name": "Grand Hotels & Resorts Ltd"
+      },
+      "Amount": 210000.0,
+      "CloseDate": "2026-08-26",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-19T21:33:01.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001WUFJQA4"
+      },
+      "Id": "006jV000001WUFJQA4",
+      "Name": "Acme - 50 robot arms",
+      "AccountId": "001jV00000Bfa1BQAR",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000Bfa1BQAR"
+        },
+        "Name": "Acme Robotics"
+      },
+      "Amount": 125000.0,
+      "CloseDate": "2026-09-24",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-24T20:28:39.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001WUOzQAO"
+      },
+      "Id": "006jV000001WUOzQAO",
+      "Name": "Globex - cold storage retrofit",
+      "AccountId": "001jV00000Bfd0fQAB",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000Bfd0fQAB"
+        },
+        "Name": "Globex Foods"
+      },
+      "Amount": 48000.0,
+      "CloseDate": "2026-09-24",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-24T20:30:06.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001WUSDQA4"
+      },
+      "Id": "006jV000001WUSDQA4",
+      "Name": "Initech - site licence",
+      "AccountId": "001jV00000BfdBxQAJ",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000BfdBxQAJ"
+        },
+        "Name": "Initech Software"
+      },
+      "Amount": null,
+      "CloseDate": "2026-09-24",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-24T20:30:31.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001WUvFQAW"
+      },
+      "Id": "006jV000001WUvFQAW",
+      "Name": "Umbrella - pilot",
+      "AccountId": "001jV00000BfUwgQAF",
+      "Account": {
+        "attributes": {
+          "type": "Account",
+          "url": "/services/data/v66.0/sobjects/Account/001jV00000BfUwgQAF"
+        },
+        "Name": "Umbrella Health"
+      },
+      "Amount": 12000.0,
+      "CloseDate": "2026-09-24",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-24T20:34:40.000+0000"
+    },
+    {
+      "attributes": {
+        "type": "Opportunity",
+        "url": "/services/data/v66.0/sobjects/Opportunity/006jV000001WRlHQAW"
+      },
+      "Id": "006jV000001WRlHQAW",
+      "Name": "Orphan deal - no account",
+      "AccountId": null,
+      "Account": null,
+      "Amount": 5000.0,
+      "CloseDate": "2026-09-24",
+      "StageName": "Closed Won",
+      "SystemModstamp": "2026-09-24T20:37:07.000+0000"
+    }
+  ]
+}
