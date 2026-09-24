@@ -12,6 +12,16 @@ Parameters:
     Description: >
       owner/repo allowed to deploy, e.g. ShathyaPranav/relay. Leave empty on
       the first deploy (Phase 2.1); set it in Phase 2.2 to create the OIDC role.
+  GitHubSubjectPrefix:
+    Type: String
+    Default: ""
+    Description: >
+      The repo's OIDC subject prefix, from
+      `gh api repos/OWNER/REPO/actions/oidc/customization/sub` (sub_claim_prefix).
+      Newer repos use GitHub's immutable form,
+      repo:OWNER@OWNER_ID/REPO@REPO_ID, which pins the numeric IDs so a
+      renamed or re-created repo with the same name can't assume the role.
+      Leave empty to use the older repo:OWNER/REPO form.
   AppStackName:
     Type: String
     Default: relay-dev
@@ -19,6 +29,7 @@ Parameters:
 
 Conditions:
   WithGitHub: !Not [!Equals [!Ref GitHubRepo, ""]]
+  HasSubjectPrefix: !Not [!Equals [!Ref GitHubSubjectPrefix, ""]]
 
 Resources:
   # One repository for all three images (tags: ingest-*, worker-*, reconciler-*).
@@ -76,7 +87,9 @@ Resources:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
                 # Only workflow runs on main in this one repository.
-                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepo}:ref:refs/heads/main
+                token.actions.githubusercontent.com:sub: !Sub
+                  - "${Prefix}:ref:refs/heads/main"
+                  - Prefix: !If [HasSubjectPrefix, !Ref GitHubSubjectPrefix, !Sub "repo:${GitHubRepo}"]
       Policies:
         - PolicyName: deploy-relay
           PolicyDocument:

@@ -229,7 +229,8 @@ Then:
    and pushes `main` with your existing credentials.
 2. Create the OIDC deploy role by re-deploying the bootstrap stack with the repo name:
    ```powershell
-   aws cloudformation deploy --template-file infra/bootstrap.yaml --stack-name relay-bootstrap --capabilities CAPABILITY_NAMED_IAM --parameter-overrides GitHubRepo=<owner>/<repo> --profile relay
+   gh api repos/<owner>/<repo>/actions/oidc/customization/sub     # note sub_claim_prefix
+   aws cloudformation deploy --template-file infra/bootstrap.yaml --stack-name relay-bootstrap --capabilities CAPABILITY_NAMED_IAM --parameter-overrides GitHubRepo=<owner>/<repo> GitHubSubjectPrefix=<sub_claim_prefix> --profile relay
    aws cloudformation describe-stacks --stack-name relay-bootstrap --query "Stacks[0].Outputs" --profile relay
    ```
 3. GitHub > repo > Settings > Secrets and variables > Actions > **Variables**
