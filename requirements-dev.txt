@@ -1,6 +1,6 @@
 # Tooling for running tests and linters on your machine and in CI.
 # The Lambda images pin their own runtime dependencies in their own requirements.txt.
-boto3==1.43.99
+boto3[crt]==1.43.99  # crt: needed to use `aws login` sessions
 requests==2.34.2
 PyYAML==6.0.3
 python-dotenv==1.2.3
