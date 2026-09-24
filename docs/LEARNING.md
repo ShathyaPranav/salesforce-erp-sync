@@ -345,6 +345,36 @@ the first attempt, a hand-deleted order repaired by the reconciler, and
 under 30% injected ERP failures 10 retries and 20 skipped duplicates with no
 double orders.
 
+## Phase 2.2 on GitHub: the pipeline deploys itself
+
+**What I built.** The repository `ShathyaPranav/salesforce-erp-sync`, five
+Actions variables, and the OIDC trust in `infra/bootstrap.yaml`
+(`GitHubDeployRole`, new parameter `GitHubSubjectPrefix`).
+
+**How it works.** The first push ran lint, unit and the full failure suite
+green on GitHub's runners. The deploy job, however, was refused with
+"Not authorized to perform sts:AssumeRoleWithWebIdentity". The cause was a
+recent GitHub change: new repositories sign OIDC tokens with an **immutable
+subject**, `repo:ShathyaPranav@222447270/salesforce-erp-sync@1386425935:ref:refs/heads/main`,
+which names the owner and repository by numeric ID as well as by name. The
+role trusted the old name-only form, so AWS correctly said no. The fix was to
+trust the exact prefix GitHub reports
+(`gh api repos/OWNER/REPO/actions/oidc/customization/sub`). The key idea is
+**why the IDs matter**. With name-only trust, anyone who later owned a
+repository with the same name (after a rename or deletion) could assume the
+deploy role. Numeric IDs are never reused, so that hole closes. The next push
+went green end to end: tests, `sam deploy`, and a live smoke test.
+
+**See it yourself.** Open the Actions tab on GitHub. Each run shows the four
+jobs, and the deploy job's log shows the role being assumed with no keys stored anywhere.
+
+**Interview check.** *Your OIDC deploy failed with "not authorized". How did
+you debug it?* The error came from STS, so the trust policy's conditions
+didn't match the token. I compared the policy's `sub` with what GitHub
+issues for the repo, found GitHub now uses an immutable subject with numeric
+IDs, and pinned the role to that exact value instead of loosening it with a
+wildcard. It's both the fix and a security improvement.
+
 ## Reading guide: the four core pieces
 
 Read these until you can explain every line. That's what the interview tests.

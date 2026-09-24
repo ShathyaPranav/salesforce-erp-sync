@@ -1,5 +1,7 @@
 # Relay
 
+[![ci](https://github.com/ShathyaPranav/salesforce-erp-sync/actions/workflows/ci.yml/badge.svg)](https://github.com/ShathyaPranav/salesforce-erp-sync/actions/workflows/ci.yml)
+
 Relay mirrors every Closed Won deal in Salesforce into an ERP as an order and
 an invoice, and keeps it correct when messages repeat, arrive out of order,
 or the ERP is down.
